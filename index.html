@@ -28,9 +28,6 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .card.reject{border-color:var(--bad);outline-color:var(--bad)}
 .card h2{font-family:'Oswald',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:.6px;font-size:14px;color:var(--navy);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .card.reject h2{color:var(--bad);border-bottom-color:#e0a6a2}
-.shot{border:2px dashed var(--line);border-radius:2px;min-height:160px;display:flex;align-items:center;justify-content:center;background:#f7fafd;overflow:hidden;margin-bottom:10px}
-.shot span{font-size:13px;color:#6b7a89;padding:16px;text-align:center}
-.shot img{width:100%;display:block}
 .btn{display:block;width:100%;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:.7px;font-size:15px;font-weight:500;border:0;border-radius:2px;padding:13px;cursor:pointer}
 .btn.primary{background:var(--navy);color:#fff}
 .btn.primary:active{background:var(--navy-dark)}
@@ -38,6 +35,16 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .btn.ghost{background:#fff;color:var(--navy);border:2px solid var(--navy)}
 .btn+.btn{margin-top:8px}
 .btn[disabled]{opacity:.55;cursor:not-allowed}
+
+/* camera with the card frame drawn over it */
+.view{position:relative;background:#000;border-radius:2px;overflow:hidden;margin-bottom:10px;min-height:150px}
+.view video{width:100%;display:block}
+.frame{position:absolute;border:3px solid var(--gold);box-shadow:0 0 0 2000px rgba(0,0,0,.45);border-radius:4px;pointer-events:none}
+.frame b{position:absolute;left:0;right:0;bottom:-26px;text-align:center;color:#fff;font-family:'Oswald',sans-serif;font-size:12px;font-weight:400;letter-spacing:.5px;text-transform:uppercase}
+.hint{font-size:12.5px;color:#6b7a89;margin:0 0 10px}
+.shot{border:2px dashed var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px;display:none}
+.shot img{width:100%;display:block}
+
 .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:3px 7px;border-radius:2px;margin-bottom:10px}
 .badge.on{background:#e6f4ec;color:var(--ok)}
 .badge.off{background:#fdeceb;color:var(--bad)}
@@ -50,6 +57,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .row .k{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--navy)}
 .row .v{font-size:16px;font-weight:500;word-break:break-word;margin-top:1px}
 .row .v.none{color:var(--bad);font-weight:400;font-style:italic}
+.warn{background:#fdeceb;border-left:4px solid var(--bad);color:var(--bad);padding:9px 10px;font-size:13px;margin:0 0 12px;display:none}
 .big{font-family:'Oswald',sans-serif;font-size:18px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin:0 0 6px}
 .why{font-size:13.5px;margin:0 0 10px}
 .seen{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
@@ -76,22 +84,27 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 
 <main>
 
-  <div class="card">
-    <h2>Photo of the card</h2>
+  <div class="card" id="capture">
+    <h2>Frame the card</h2>
     <div id="engine" class="badge wait">Checking the reader</div>
-    <div class="shot" id="shot"><span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span></div>
+    <p class="hint">Fit the whole card inside the gold frame, edge to edge, and hold the phone square to it. Only what is inside the frame is read.</p>
+    <div class="view" id="view">
+      <video id="video" playsinline muted></video>
+      <div class="frame" id="frame"><b>Whole card inside this frame</b></div>
+    </div>
+    <div class="shot" id="shot"><img id="shotImg" alt="What was read"></div>
+    <button class="btn gold" id="shoot">Capture and read</button>
     <input type="file" id="file" accept="image/*" capture="environment" hidden>
-    <button class="btn primary" id="snap">Take photo</button>
-    <button class="btn ghost" id="pick">Choose from gallery</button>
-    <button class="btn gold" id="read" disabled>Read the card</button>
+    <button class="btn ghost" id="pick">Use a photo from the gallery</button>
     <div class="bar" id="bar"><i id="barFill"></i></div>
     <div class="status" id="st"></div>
   </div>
 
   <div class="card" id="out">
     <h2>Card details</h2>
+    <div class="warn" id="warn"></div>
     <div id="rows"></div>
-    <button class="btn ghost" id="reset" style="margin-top:14px">Read another card</button>
+    <button class="btn primary" id="again" style="margin-top:14px">Retake the photo</button>
   </div>
 
   <div class="card reject" id="reject">
@@ -102,7 +115,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
       <h3>Text the reader picked up</h3>
       <ul id="seenList"></ul>
     </div>
-    <button class="btn ghost" id="reset2" style="margin-top:14px">Try again</button>
+    <button class="btn primary" id="again2" style="margin-top:14px">Retake the photo</button>
   </div>
 
 </main>
@@ -111,28 +124,38 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 /* ------------------------------------------------------------------
    WHAT THIS APP KEEPS
 
-   Six labelled lines and nothing else. Every wanted value now sits
-   behind its own label and a colon on the card, so there is no
-   guessing by size or position any more: a line either carries one of
-   these labels or it is thrown away. The photograph, the logo, the
-   organisation band, Email and ID are all ignored.
+   Six labelled lines and nothing else. Each value sits behind its own
+   label and a colon on the card, so nothing is inferred from size or
+   position, and a line with no wanted label is thrown away.
 
-   MIN_LABELS is the gate. Below it the app says Wrong ID and keeps
-   nothing at all.
+   The photograph is not read at all: the frame crop plus the two mask
+   zones below blank out the top band and the portrait column before
+   the reader ever sees the image. Those two numbers match the card
+   template, so change them together if the card layout changes.
 -------------------------------------------------------------------*/
-var WANTED     = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
-var MIN_LABELS = 3;
+var WANTED      = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
+var MIN_LABELS  = 3;      // fewer than this and the card is refused outright
+var MIN_CONF    = 62;     // reader confidence below this asks for a retake
+var CARD_RATIO  = 1.6;    // card width divided by height, 1200 by 750
+var MASK_TOP    = 0.22;   // the blue band
+var MASK_LEFT   = 0.30;   // the portrait column
 
-var imgURL = null, worker = null;
+var worker = null, stream = null, lastURL = null;
+
+var view = document.getElementById('view');
+var video = document.getElementById('video');
+var frameEl = document.getElementById('frame');
 var shot = document.getElementById('shot');
+var shotImg = document.getElementById('shotImg');
 var file = document.getElementById('file');
-var st   = document.getElementById('st');
-var out  = document.getElementById('out');
+var st = document.getElementById('st');
+var out = document.getElementById('out');
+var warn = document.getElementById('warn');
 var rows = document.getElementById('rows');
 var reject = document.getElementById('reject');
 var why = document.getElementById('why');
 var seenList = document.getElementById('seenList');
-var readBtn = document.getElementById('read');
+var shootBtn = document.getElementById('shoot');
 var engine = document.getElementById('engine');
 var bar = document.getElementById('bar');
 var barFill = document.getElementById('barFill');
@@ -154,89 +177,139 @@ function progress(p){
 }
 function hidePanels(){ out.style.display = 'none'; reject.style.display = 'none'; }
 
-document.getElementById('snap').onclick = function(){
-  file.setAttribute('capture','environment'); file.value = ''; file.click();
+/* ---- the frame, in fractions of the picture, used for both the
+        overlay you see and the crop that is actually read ---- */
+function frameBox(w, h){
+  var fw = w * 0.94, fh = fw / CARD_RATIO;
+  if(fh > h * 0.88){ fh = h * 0.88; fw = fh * CARD_RATIO; }
+  return { x: (w - fw) / 2 / w, y: (h - fh) / 2 / h, w: fw / w, h: fh / h };
+}
+function drawFrame(){
+  var w = video.videoWidth, h = video.videoHeight;
+  if(!w || !h) return;
+  var b = frameBox(w, h);
+  frameEl.style.left = (b.x * 100) + '%';
+  frameEl.style.top = (b.y * 100) + '%';
+  frameEl.style.width = (b.w * 100) + '%';
+  frameEl.style.height = (b.h * 100) + '%';
+}
+video.addEventListener('loadedmetadata', drawFrame);
+window.addEventListener('resize', drawFrame);
+
+function startCamera(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    noCamera('This browser will not give the page a camera.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false
+  }).then(function(s){
+    stream = s;
+    video.srcObject = s;
+    return video.play();
+  }).then(drawFrame)
+    .catch(function(e){ noCamera('The camera could not start. ' + (e && e.message ? e.message : e)); });
+}
+function noCamera(msg){
+  view.style.display = 'none';
+  shootBtn.style.display = 'none';
+  say('err', msg + ' Use a photo from the gallery instead.');
+}
+startCamera();
+
+shootBtn.onclick = function(){
+  if(!video.videoWidth){ say('err','The camera is not ready yet.'); return; }
+  var w = video.videoWidth, h = video.videoHeight, b = frameBox(w, h);
+  var c = document.createElement('canvas');
+  var outW = 1800, outH = Math.round(outW / CARD_RATIO);
+  c.width = outW; c.height = outH;
+  c.getContext('2d').drawImage(video, b.x * w, b.y * h, b.w * w, b.h * h, 0, 0, outW, outH);
+  readCanvas(c);
 };
-document.getElementById('pick').onclick = function(){
-  file.removeAttribute('capture'); file.value = ''; file.click();
-};
+
+document.getElementById('pick').onclick = function(){ file.value = ''; file.click(); };
 
 file.onchange = function(){
   var f = file.files && file.files[0];
   if(!f) return;
-  clear(); hidePanels(); progress(null);
-  prepare(f, function(url){
-    imgURL = url;
-    shot.innerHTML = '<img src="' + url + '" alt="Captured card">';
-    readBtn.disabled = !HAS_OCR;
-    if(!HAS_OCR) say('err','The reader did not load, so the card cannot be read. Reload the page once you have a connection.');
-  }, function(msg){ say('err', msg); });
-};
-
-/* Resize to 1800px on the long side, grey it, stretch the contrast. */
-function prepare(f, done, fail){
+  clear(); hidePanels();
   var r = new FileReader();
-  r.onerror = function(){ fail('Could not read that file. Try taking the photo again.'); };
+  r.onerror = function(){ say('err','Could not read that file.'); };
   r.onload = function(){
     var im = new Image();
-    im.onerror = function(){ fail('That file is not an image the browser can open.'); };
+    im.onerror = function(){ say('err','That file is not an image the browser can open.'); };
     im.onload = function(){
       var max = 1800, w = im.width, h = im.height;
       if(Math.max(w,h) > max){ var s = max/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s); }
       var c = document.createElement('canvas'); c.width = w; c.height = h;
-      var ctx = c.getContext('2d');
-      ctx.drawImage(im, 0, 0, w, h);
-      try{
-        var d = ctx.getImageData(0, 0, w, h), px = d.data, lo = 255, hi = 0, i, g;
-        for(i = 0; i < px.length; i += 4){
-          g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
-          px[i] = px[i+1] = px[i+2] = g;
-          if(g < lo) lo = g;
-          if(g > hi) hi = g;
-        }
-        var span = Math.max(1, hi - lo), v;
-        for(i = 0; i < px.length; i += 4){
-          v = (px[i] - lo) * 255 / span;
-          v = v < 0 ? 0 : v > 255 ? 255 : v;
-          px[i] = px[i+1] = px[i+2] = v;
-        }
-        ctx.putImageData(d, 0, 0);
-      }catch(e){ }
-      done(c.toDataURL('image/jpeg', 0.92));
+      c.getContext('2d').drawImage(im, 0, 0, w, h);
+      readCanvas(c);
     };
     im.src = r.result;
   };
   r.readAsDataURL(f);
+};
+
+/* grey, stretch the contrast, then blank the band and the portrait */
+function clean(c){
+  var ctx = c.getContext('2d'), w = c.width, h = c.height;
+  try{
+    var d = ctx.getImageData(0, 0, w, h), px = d.data, lo = 255, hi = 0, i, g;
+    for(i = 0; i < px.length; i += 4){
+      g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
+      px[i] = px[i+1] = px[i+2] = g;
+      if(g < lo) lo = g;
+      if(g > hi) hi = g;
+    }
+    var span = Math.max(1, hi - lo), v;
+    for(i = 0; i < px.length; i += 4){
+      v = (px[i] - lo) * 255 / span;
+      px[i] = px[i+1] = px[i+2] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+    ctx.putImageData(d, 0, 0);
+  }catch(e){ }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h * MASK_TOP);
+  ctx.fillRect(0, h * MASK_TOP, w * MASK_LEFT, h * (1 - MASK_TOP));
+  return c;
 }
 
-readBtn.onclick = function(){
-  if(!imgURL || !HAS_OCR) return;
-  readBtn.disabled = true;
+function readCanvas(c){
+  if(!HAS_OCR){ say('err','The reader did not load. Reload the page once you have a connection.'); return; }
+  clean(c);
+  lastURL = c.toDataURL('image/jpeg', 0.92);
+  shotImg.src = lastURL;
+  shot.style.display = 'block';
   hidePanels();
+  shootBtn.disabled = true;
   say('work','Reading the card...');
   progress(0);
 
   ready()
-    .then(function(w){ return w.recognize(imgURL); })
+    .then(function(w){ return w.recognize(lastURL); })
     .then(function(res){
       progress(null);
-      readBtn.disabled = false;
-      var lines = String((res && res.data && res.data.text) || '')
+      shootBtn.disabled = false;
+      var data = (res && res.data) || {};
+      var conf = typeof data.confidence === 'number' ? data.confidence : 100;
+      var lines = String(data.text || '')
                     .split('\n')
                     .map(function(t){ return t.replace(/\s+/g, ' ').trim(); })
                     .filter(function(t){ return t.length > 1; });
       if(!lines.length){
-        say('err','No text was found. Move closer, hold the card flat, and keep the light off the surface.');
+        say('err','No text was found inside the frame. Fill the frame with the card and try again.');
         return;
       }
-      verdict(lines);
+      verdict(lines, conf);
     })
     .catch(function(e){
       progress(null);
-      readBtn.disabled = false;
+      shootBtn.disabled = false;
       say('err','Could not read the card. ' + (e && e.message ? e.message : e));
     });
-};
+}
 
 function ready(){
   if(worker) return Promise.resolve(worker);
@@ -246,7 +319,7 @@ function ready(){
   }).then(function(w){ worker = w; return w; });
 }
 
-/* ---- loose label matching, since OCR turns Tel into Tal or Te1 ---- */
+/* ---- loose label matching, one wrong character forgiven ---- */
 function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g, ''); }
 
 function near(a, b){
@@ -275,47 +348,94 @@ function splitLabel(line){
   return { label: label, value: line.slice(at + 1).trim() };
 }
 
-/* ---- keep the six, count them, then accept or refuse ---- */
-function verdict(lines){
+/* ---- scrape the scraps off the end of a value ----
+   Stray marks from the card edge or the lamination land as one or two
+   loose characters after the real text, so they are cut off, and the
+   two fields with a known shape are matched on that shape.        */
+function tidy(key, v){
+  v = v.replace(/[|_~`\^\[\]{}<>]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  var t = v.split(' ');
+  while(t.length > 2){
+    var last = t[t.length - 1];
+    if(/^[^A-Za-z0-9]+$/.test(last) || last.length <= 2 && !/^\d{4}$/.test(last)) t.pop();
+    else break;
+  }
+  v = t.join(' ').replace(/[\s,.;:-]+$/, '').trim();
+
+  if(key === 'Tel'){
+    var m = v.match(/\+?\s?\d[\d\s().-]{6,}/);
+    if(m) v = m[0].trim();
+    v = v.replace(/(\d{3,4})\s+\d{1,2}$/, '$1');       // a loose digit after a full number
+    v = v.replace(/[\s.-]+$/, '');
+  }
+
+  if(key === 'Valid'){
+    var m2 = v.match(/[A-Za-z]{3,}\s*\d{4}\s*(?:-|–|—|to)\s*[A-Za-z]{3,}\s*\d{4}/);
+    if(m2) v = m2[0].replace(/\s*(-|–|—)\s*/, '-').trim();
+  }
+
+  if(key === 'Name' || key === 'Position' || key === 'Dept'){
+    v = v.replace(/[^A-Za-z)'.\-]+$/, '').trim();
+  }
+
+  return v;
+}
+
+/* ---- keep the six, then accept, warn, or refuse ---- */
+function verdict(lines, conf){
   var found = {}, hits = 0, i;
 
   for(i = 0; i < lines.length; i++){
     var parts = splitLabel(lines[i]);
-    if(!parts) continue;                                  // no label, no interest
+    if(!parts) continue;
 
     var wanted = null;
     WANTED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
-    if(!wanted || found[wanted]) continue;                // Email and ID are dropped here
+    if(!wanted || found[wanted]) continue;      // Email, ID and anything else are dropped
 
-    var value = parts.value;
-    if(!value && lines[i+1] && !splitLabel(lines[i+1])) value = lines[i+1];
+    // No borrowing from the next line. A label whose own value was cut
+    // off stays empty rather than stealing the line below it, which is
+    // how a Name once ended up holding the position.
+    var value = tidy(wanted, parts.value);
     if(!value) continue;
 
     found[wanted] = value;
     hits++;
   }
 
-  if(hits < MIN_LABELS) show_reject(lines, found, hits);
-  else show_fields(found);
+  if(hits < MIN_LABELS){ show_reject(lines, found, hits); return; }
+  show_fields(found, conf);
 }
 
-function show_fields(found){
+function show_fields(found, conf){
   rows.innerHTML = '';
-  var missing = 0;
+  var missing = [];
   WANTED.forEach(function(key){
     var row = document.createElement('div'); row.className = 'row';
     var k = document.createElement('div'); k.className = 'k'; k.textContent = key;
     var v = document.createElement('div');
     if(found[key]){ v.className = 'v'; v.textContent = found[key]; }
-    else { v.className = 'v none'; v.textContent = 'not read'; missing++; }
+    else { v.className = 'v none'; v.textContent = 'not read'; missing.push(key); }
     row.appendChild(k); row.appendChild(v);
     rows.appendChild(row);
   });
+
+  var blurry = conf < MIN_CONF;
+  if(missing.length || blurry){
+    warn.style.display = 'block';
+    warn.textContent = (blurry ? 'The photo is not clear enough to trust. ' : '') +
+      (missing.length ? 'Missing: ' + missing.join(', ') + '. ' : '') +
+      'Retake it with the card filling the frame and the light off the surface.';
+  } else {
+    warn.style.display = 'none';
+  }
+
   reject.style.display = 'none';
   out.style.display = 'block';
-  say(missing ? 'err' : 'good',
-      missing ? missing + ' of the six fields did not come through. Retake the photo in better light before you rely on it.'
-              : 'All six fields read.');
+  say(missing.length || blurry ? 'err' : 'good',
+      missing.length || blurry ? 'Read with problems, see the panel below.'
+                              : 'All six fields read, reader confidence ' + Math.round(conf) + ' percent.');
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
@@ -324,7 +444,7 @@ function show_reject(lines, found, hits){
   why.textContent = hits === 0
     ? 'Not one of the six labelled fields was found, so this is not an ICF-SL staff card.'
     : 'Only ' + hits + ' of the six fields were found. Missing: ' + missing.join(', ') +
-      '. Either this is not an ICF-SL card or the photo is too blurred to trust, so nothing was kept.';
+      '. Either this is not an ICF-SL card or the photo is too cut or blurred to trust, so nothing was kept.';
   seenList.innerHTML = '';
   lines.slice(0, 12).forEach(function(t){
     var li = document.createElement('li'); li.textContent = t; seenList.appendChild(li);
@@ -336,16 +456,18 @@ function show_reject(lines, found, hits){
 }
 
 function resetAll(){
-  imgURL = null;
   rows.innerHTML = ''; seenList.innerHTML = '';
+  warn.style.display = 'none';
   hidePanels();
-  shot.innerHTML = '<span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span>';
-  readBtn.disabled = true;
+  shot.style.display = 'none';
+  shotImg.removeAttribute('src');
   clear(); progress(null);
+  shootBtn.disabled = false;
+  if(!stream) startCamera();
   window.scrollTo({top:0, behavior:'smooth'});
 }
-document.getElementById('reset').onclick = resetAll;
-document.getElementById('reset2').onclick = resetAll;
+document.getElementById('again').onclick = resetAll;
+document.getElementById('again2').onclick = resetAll;
 </script>
 </body>
 </html>
