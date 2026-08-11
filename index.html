@@ -98,7 +98,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
     <h2>Card not accepted</h2>
     <p class="big">Wrong ID</p>
     <p class="why" id="why"></p>
-    <div class="seen" id="seen">
+    <div class="seen">
       <h3>Text the reader picked up</h3>
       <ul id="seenList"></ul>
     </div>
@@ -109,23 +109,21 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 
 <script>
 /* ------------------------------------------------------------------
-   WHAT THIS APP ACCEPTS
+   WHAT THIS APP KEEPS
 
-   LABELLED   read from the text after the colon
-   UNLABELLED found by size and position, because they carry no colon
-   MIN_LABELS how many of the labelled fields must be found before the
-              card counts as an ICF-SL card at all. Below this the app
-              says Wrong ID and keeps nothing.
-   Anything else printed on the card is ignored, including Email, ID
-   and the organisation name in the blue band.
+   Six labelled lines and nothing else. Every wanted value now sits
+   behind its own label and a colon on the card, so there is no
+   guessing by size or position any more: a line either carries one of
+   these labels or it is thrown away. The photograph, the logo, the
+   organisation band, Email and ID are all ignored.
+
+   MIN_LABELS is the gate. Below it the app says Wrong ID and keeps
+   nothing at all.
 -------------------------------------------------------------------*/
-var LABELLED   = ['Dept', 'Tel', 'Address', 'Valid'];
-var UNLABELLED = ['Name', 'Position'];
-var ORDER      = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
-var MIN_LABELS = 2;
-var TOP_STRIP  = 0.20;   // the blue band, ignored when hunting for the name
+var WANTED     = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
+var MIN_LABELS = 3;
 
-var imgURL = null, imgH = 0, worker = null;
+var imgURL = null, worker = null;
 var shot = document.getElementById('shot');
 var file = document.getElementById('file');
 var st   = document.getElementById('st');
@@ -167,8 +165,8 @@ file.onchange = function(){
   var f = file.files && file.files[0];
   if(!f) return;
   clear(); hidePanels(); progress(null);
-  prepare(f, function(url, h){
-    imgURL = url; imgH = h;
+  prepare(f, function(url){
+    imgURL = url;
     shot.innerHTML = '<img src="' + url + '" alt="Captured card">';
     readBtn.disabled = !HAS_OCR;
     if(!HAS_OCR) say('err','The reader did not load, so the card cannot be read. Reload the page once you have a connection.');
@@ -204,7 +202,7 @@ function prepare(f, done, fail){
         }
         ctx.putImageData(d, 0, 0);
       }catch(e){ }
-      done(c.toDataURL('image/jpeg', 0.92), h);
+      done(c.toDataURL('image/jpeg', 0.92));
     };
     im.src = r.result;
   };
@@ -219,11 +217,14 @@ readBtn.onclick = function(){
   progress(0);
 
   ready()
-    .then(function(w){ return w.recognize(imgURL, {}, { text: true, blocks: true }); })
+    .then(function(w){ return w.recognize(imgURL); })
     .then(function(res){
       progress(null);
       readBtn.disabled = false;
-      var lines = linesFrom(res && res.data);
+      var lines = String((res && res.data && res.data.text) || '')
+                    .split('\n')
+                    .map(function(t){ return t.replace(/\s+/g, ' ').trim(); })
+                    .filter(function(t){ return t.length > 1; });
       if(!lines.length){
         say('err','No text was found. Move closer, hold the card flat, and keep the light off the surface.');
         return;
@@ -245,43 +246,7 @@ function ready(){
   }).then(function(w){ worker = w; return w; });
 }
 
-/* ---- lines, with their height and position when the engine gives them ---- */
-function linesFrom(data){
-  var lines = [];
-  if(data && data.blocks && data.blocks.length){
-    data.blocks.forEach(function(b){
-      (b.paragraphs || []).forEach(function(p){
-        (p.lines || []).forEach(function(l){
-          var t = String(l.text || '').replace(/\s+/g, ' ').trim();
-          if(!t) return;
-          var bb = l.bbox || {};
-          var y0 = typeof bb.y0 === 'number' ? bb.y0 : null;
-          var y1 = typeof bb.y1 === 'number' ? bb.y1 : null;
-          lines.push({
-            text: t,
-            top: y0,
-            mid: (y0 !== null && y1 !== null) ? (y0 + y1) / 2 : null,
-            h: (y0 !== null && y1 !== null) ? (y1 - y0) : null
-          });
-        });
-      });
-    });
-  }
-  if(!lines.length && data && data.text){
-    String(data.text).split('\n').forEach(function(t){
-      t = t.replace(/\s+/g, ' ').trim();
-      if(t) lines.push({ text: t, top: null, mid: null, h: null });
-    });
-  }
-  if(lines.length && lines[0].mid !== null){
-    lines.sort(function(a, b){ return a.mid - b.mid; });
-  }
-  return lines;
-}
-
-/* ---- matching a printed label to a wanted one, loosely ----
-   OCR turns Tel into Tal or Te1 often enough that exact matching is
-   too brittle, so one wrong character is forgiven.                 */
+/* ---- loose label matching, since OCR turns Tel into Tal or Te1 ---- */
 function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g, ''); }
 
 function near(a, b){
@@ -310,67 +275,34 @@ function splitLabel(line){
   return { label: label, value: line.slice(at + 1).trim() };
 }
 
-/* ---- pull the six fields out, then decide whether to accept the card ---- */
+/* ---- keep the six, count them, then accept or refuse ---- */
 function verdict(lines){
-  var found = {}, hits = 0, leftovers = [], i;
+  var found = {}, hits = 0, i;
 
-  // 1. the four labelled fields
   for(i = 0; i < lines.length; i++){
-    var parts = splitLabel(lines[i].text);
-    if(!parts){ leftovers.push(lines[i]); continue; }
+    var parts = splitLabel(lines[i]);
+    if(!parts) continue;                                  // no label, no interest
 
     var wanted = null;
-    LABELLED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
-    if(!wanted) continue;                                  // Email and ID land here and are dropped
+    WANTED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
+    if(!wanted || found[wanted]) continue;                // Email and ID are dropped here
 
     var value = parts.value;
-    if(!value && lines[i+1] && !splitLabel(lines[i+1].text)) value = lines[i+1].text;
-    if(found[wanted]) continue;
+    if(!value && lines[i+1] && !splitLabel(lines[i+1])) value = lines[i+1];
+    if(!value) continue;
+
     found[wanted] = value;
-    if(value) hits++;
+    hits++;
   }
 
-  // 2. the organisation band, used only as a hint that this is an ICF card
-  var orgSeen = lines.some(function(l){
-    var n = norm(l.text);
-    return n.indexOf('informatics') > -1 || n.indexOf('consultancy') > -1;
-  });
-
-  // 3. name and position, from the colon free lines below the blue band
-  var cut = imgH ? imgH * TOP_STRIP : 0;
-  var cands = leftovers.filter(function(l){
-    var n = norm(l.text);
-    if(n.length < 4) return false;
-    if(l.text.indexOf('@') > -1) return false;
-    if(n.indexOf('informatics') > -1 || n.indexOf('consultancy') > -1 || n.indexOf('sierraleone') > -1) return false;
-    if(l.top !== null && cut && l.top < cut) return false;
-    return /[A-Za-z]{3}/.test(l.text);
-  });
-
-  if(cands.length){
-    var nameLine = cands[0], k;
-    if(cands[0].h !== null){
-      for(k = 1; k < cands.length; k++) if(cands[k].h > nameLine.h) nameLine = cands[k];
-    }
-    found['Name'] = nameLine.text;
-    var at = cands.indexOf(nameLine);
-    if(cands[at + 1]) found['Position'] = cands[at + 1].text;
-  }
-
-  // 4. accept or refuse
-  var recognised = hits >= MIN_LABELS || (orgSeen && hits >= 1);
-  if(!recognised){
-    show_reject(lines, hits, orgSeen);
-    return;
-  }
-
-  show_fields(found);
+  if(hits < MIN_LABELS) show_reject(lines, found, hits);
+  else show_fields(found);
 }
 
 function show_fields(found){
   rows.innerHTML = '';
   var missing = 0;
-  ORDER.forEach(function(key){
+  WANTED.forEach(function(key){
     var row = document.createElement('div'); row.className = 'row';
     var k = document.createElement('div'); k.className = 'k'; k.textContent = key;
     var v = document.createElement('div');
@@ -387,13 +319,15 @@ function show_fields(found){
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-function show_reject(lines, hits, orgSeen){
-  why.textContent = orgSeen
-    ? 'The ICF-SL name was found but only ' + hits + ' of the four labelled fields, so this is either the wrong side of the card or too blurred to trust.'
-    : 'None of the fields this app expects were found. Dept, Tel, Address and Valid are all missing, so this is not an ICF-SL staff card.';
+function show_reject(lines, found, hits){
+  var missing = WANTED.filter(function(w){ return !found[w]; });
+  why.textContent = hits === 0
+    ? 'Not one of the six labelled fields was found, so this is not an ICF-SL staff card.'
+    : 'Only ' + hits + ' of the six fields were found. Missing: ' + missing.join(', ') +
+      '. Either this is not an ICF-SL card or the photo is too blurred to trust, so nothing was kept.';
   seenList.innerHTML = '';
-  lines.slice(0, 12).forEach(function(l){
-    var li = document.createElement('li'); li.textContent = l.text; seenList.appendChild(li);
+  lines.slice(0, 12).forEach(function(t){
+    var li = document.createElement('li'); li.textContent = t; seenList.appendChild(li);
   });
   out.style.display = 'none';
   reject.style.display = 'block';
@@ -402,7 +336,7 @@ function show_reject(lines, hits, orgSeen){
 }
 
 function resetAll(){
-  imgURL = null; imgH = 0;
+  imgURL = null;
   rows.innerHTML = ''; seenList.innerHTML = '';
   hidePanels();
   shot.innerHTML = '<span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span>';
