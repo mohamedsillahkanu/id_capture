@@ -37,11 +37,11 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .btn[disabled]{opacity:.55;cursor:not-allowed}
 
 /* camera with the card frame drawn over it */
-.view{position:relative;background:#000;border-radius:2px;overflow:hidden;margin-bottom:10px;min-height:150px}
+.view{position:relative;background:#000;border-radius:2px;overflow:hidden;margin-bottom:12px;min-height:150px}
 .view video{width:100%;display:block}
 .frame{position:absolute;border:3px solid var(--gold);box-shadow:0 0 0 2000px rgba(0,0,0,.45);border-radius:4px;pointer-events:none}
 .frame b{position:absolute;left:0;right:0;bottom:-26px;text-align:center;color:#fff;font-family:'Oswald',sans-serif;font-size:12px;font-weight:400;letter-spacing:.5px;text-transform:uppercase}
-.hint{font-size:12.5px;color:#6b7a89;margin:0 0 10px}
+.hint{font-size:12.5px;color:#6b7a89;margin:12px 0 10px}
 .shot{border:2px dashed var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px;display:none}
 .shot img{width:100%;display:block}
 
@@ -85,17 +85,14 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 <main>
 
   <div class="card" id="capture">
-    <h2>Frame the card</h2>
-    <div id="engine" class="badge wait">Checking the reader</div>
-    <p class="hint">Fit the whole card inside the gold frame, edge to edge, and hold the phone square to it. Only what is inside the frame is read.</p>
     <div class="view" id="view">
       <video id="video" playsinline muted></video>
       <div class="frame" id="frame"><b>Whole card inside this frame</b></div>
     </div>
-    <div class="shot" id="shot"><img id="shotImg" alt="What was read"></div>
     <button class="btn gold" id="shoot">Capture and read</button>
-    <input type="file" id="file" accept="image/*" capture="environment" hidden>
-    <button class="btn ghost" id="pick">Use a photo from the gallery</button>
+    <p class="hint">Fit the whole card inside the gold frame, edge to edge, and hold the phone square to it. Only what is inside the frame is read.</p>
+    <div id="engine" class="badge wait">Checking the reader</div>
+    <div class="shot" id="shot"><img id="shotImg" alt="The strip that was read"></div>
     <div class="bar" id="bar"><i id="barFill"></i></div>
     <div class="status" id="st"></div>
   </div>
@@ -128,17 +125,18 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
    label and a colon on the card, so nothing is inferred from size or
    position, and a line with no wanted label is thrown away.
 
-   The photograph is not read at all: the frame crop plus the two mask
-   zones below blank out the top band and the portrait column before
-   the reader ever sees the image. Those two numbers match the card
+   The photograph is never turned into text. The frame crop is trimmed
+   down to the text column before the reader is called, so the portrait
+   and the blue band are physically not in the image it reads. The two
+   numbers below are where that trim starts and they match the card
    template, so change them together if the card layout changes.
 -------------------------------------------------------------------*/
 var WANTED      = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
 var MIN_LABELS  = 3;      // fewer than this and the card is refused outright
 var MIN_CONF    = 62;     // reader confidence below this asks for a retake
 var CARD_RATIO  = 1.6;    // card width divided by height, 1200 by 750
-var MASK_TOP    = 0.22;   // the blue band
-var MASK_LEFT   = 0.30;   // the portrait column
+var CROP_TOP    = 0.22;   // everything above this is cut off, the blue band
+var CROP_LEFT   = 0.30;   // everything left of this is cut off, the portrait
 
 var worker = null, stream = null, lastURL = null;
 
@@ -147,7 +145,6 @@ var video = document.getElementById('video');
 var frameEl = document.getElementById('frame');
 var shot = document.getElementById('shot');
 var shotImg = document.getElementById('shotImg');
-var file = document.getElementById('file');
 var st = document.getElementById('st');
 var out = document.getElementById('out');
 var warn = document.getElementById('warn');
@@ -214,7 +211,7 @@ function startCamera(){
 function noCamera(msg){
   view.style.display = 'none';
   shootBtn.style.display = 'none';
-  say('err', msg + ' Use a photo from the gallery instead.');
+  say('err', msg + ' Allow the camera for this site in the browser settings, then reload. The card can only be read live through the frame.');
 }
 startCamera();
 
@@ -228,34 +225,27 @@ shootBtn.onclick = function(){
   readCanvas(c);
 };
 
-document.getElementById('pick').onclick = function(){ file.value = ''; file.click(); };
+/* keep only the text column: the photograph and the band are cut away
+   before the reader sees anything, then the crop is enlarged, greyed
+   and its contrast stretched */
+function textOnly(src){
+  var w = src.width, h = src.height;
+  var sx = Math.round(w * CROP_LEFT), sy = Math.round(h * CROP_TOP);
+  var sw = w - sx, sh = h - sy;
+  var scale = 1.4;
 
-file.onchange = function(){
-  var f = file.files && file.files[0];
-  if(!f) return;
-  clear(); hidePanels();
-  var r = new FileReader();
-  r.onerror = function(){ say('err','Could not read that file.'); };
-  r.onload = function(){
-    var im = new Image();
-    im.onerror = function(){ say('err','That file is not an image the browser can open.'); };
-    im.onload = function(){
-      var max = 1800, w = im.width, h = im.height;
-      if(Math.max(w,h) > max){ var s = max/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s); }
-      var c = document.createElement('canvas'); c.width = w; c.height = h;
-      c.getContext('2d').drawImage(im, 0, 0, w, h);
-      readCanvas(c);
-    };
-    im.src = r.result;
-  };
-  r.readAsDataURL(f);
-};
+  var c = document.createElement('canvas');
+  c.width = Math.round(sw * scale);
+  c.height = Math.round(sh * scale);
+  var ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
 
-/* grey, stretch the contrast, then blank the band and the portrait */
-function clean(c){
-  var ctx = c.getContext('2d'), w = c.width, h = c.height;
   try{
-    var d = ctx.getImageData(0, 0, w, h), px = d.data, lo = 255, hi = 0, i, g;
+    var d = ctx.getImageData(0, 0, c.width, c.height), px = d.data, lo = 255, hi = 0, i, g;
     for(i = 0; i < px.length; i += 4){
       g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
       px[i] = px[i+1] = px[i+2] = g;
@@ -270,16 +260,13 @@ function clean(c){
     ctx.putImageData(d, 0, 0);
   }catch(e){ }
 
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, w, h * MASK_TOP);
-  ctx.fillRect(0, h * MASK_TOP, w * MASK_LEFT, h * (1 - MASK_TOP));
   return c;
 }
 
 function readCanvas(c){
   if(!HAS_OCR){ say('err','The reader did not load. Reload the page once you have a connection.'); return; }
-  clean(c);
-  lastURL = c.toDataURL('image/jpeg', 0.92);
+  var zone = textOnly(c);
+  lastURL = zone.toDataURL('image/jpeg', 0.92);
   shotImg.src = lastURL;
   shot.style.display = 'block';
   hidePanels();
@@ -424,9 +411,9 @@ function show_fields(found, conf){
   var blurry = conf < MIN_CONF;
   if(missing.length || blurry){
     warn.style.display = 'block';
-    warn.textContent = (blurry ? 'The photo is not clear enough to trust. ' : '') +
-      (missing.length ? 'Missing: ' + missing.join(', ') + '. ' : '') +
-      'Retake it with the card filling the frame and the light off the surface.';
+    warn.textContent = 'Retake the photo. ' +
+      (missing.length ? 'Not captured: ' + missing.join(', ') + '. ' : 'The photo is not clear enough to trust. ') +
+      'Hold the camera steady and square to the card, fill the gold frame edge to edge, and keep the light off the surface.';
   } else {
     warn.style.display = 'none';
   }
@@ -434,7 +421,7 @@ function show_fields(found, conf){
   reject.style.display = 'none';
   out.style.display = 'block';
   say(missing.length || blurry ? 'err' : 'good',
-      missing.length || blurry ? 'Read with problems, see the panel below.'
+      missing.length || blurry ? 'Please hold the camera well and take it again.'
                               : 'All six fields read, reader confidence ' + Math.round(conf) + ' percent.');
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -442,9 +429,9 @@ function show_fields(found, conf){
 function show_reject(lines, found, hits){
   var missing = WANTED.filter(function(w){ return !found[w]; });
   why.textContent = hits === 0
-    ? 'Not one of the six labelled fields was found, so this is not an ICF-SL staff card.'
-    : 'Only ' + hits + ' of the six fields were found. Missing: ' + missing.join(', ') +
-      '. Either this is not an ICF-SL card or the photo is too cut or blurred to trust, so nothing was kept.';
+    ? 'Not one of the six labelled fields was found, so this is not an ICF-SL staff card. If it is, hold the camera well and take it again with the whole card inside the frame.'
+    : 'Only ' + hits + ' of the six fields were found. Not captured: ' + missing.join(', ') +
+      '. Retake it: hold the camera steady and square to the card, with the whole card inside the frame. Nothing was kept.';
   seenList.innerHTML = '';
   lines.slice(0, 12).forEach(function(t){
     var li = document.createElement('li'); li.textContent = t; seenList.appendChild(li);
