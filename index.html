@@ -15,7 +15,6 @@
   --line:#c9d6e4;
   --bg:#eef3f8;
   --ok:#1c7c4a;
-  --warn:#8a6100;
   --bad:#b3261e;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -58,9 +57,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .row .k{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--navy)}
 .row .v{font-size:16px;font-weight:500;word-break:break-word;margin-top:1px}
 .row .v.none{color:var(--bad);font-weight:400;font-style:italic}
-.row .note{font-size:12px;margin-top:2px}
-.row .note.once{color:var(--warn)}
-.row .note.clash{color:var(--bad)}
+.row .note{font-size:12px;margin-top:2px;color:var(--bad)}
 .warn{background:#fdeceb;border-left:4px solid var(--bad);color:var(--bad);padding:9px 10px;font-size:13px;margin:0 0 12px;display:none}
 .big{font-family:'Oswald',sans-serif;font-size:18px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin:0 0 6px}
 .why{font-size:13.5px;margin:0 0 10px}
@@ -96,7 +93,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
     </div>
     <button class="btn gold" id="shoot">Capture and read</button>
     <button class="btn ghost" id="torch">Light on</button>
-    <p class="hint">Fit the whole card inside the gold frame and hold still for a second while several frames are taken. The sharpest two are read and compared, and a field is only kept when both readings match.</p>
+    <p class="hint">Fit the whole card inside the gold frame and hold still for a second. Several frames are taken, the sharpest are read, and a field is kept when the readings agree.</p>
     <div id="engine" class="badge wait">Checking the reader</div>
     <div class="shot" id="shot"><img id="shotImg" alt="The strip that was read"></div>
     <div class="bar" id="bar"><i id="barFill"></i></div>
@@ -133,24 +130,37 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
    absent from the image being read. CROP_TOP and CROP_LEFT match the
    card template, so change them together if the layout changes.
 
-   HOW IT GUARDS AGAINST A WRONG DIGIT
+   HOW A VALUE IS KEPT
 
-   One capture takes BURST frames, scores each for sharpness, and reads
-   the sharpest PASSES of them. A field is kept only when both readings
-   agree. There is no fallback anywhere: read once, read two different
-   ways, too blurry to measure, or an image the phone cannot prepare all
-   stop the read and ask for another photo. Nothing degraded is ever
-   shown as a value.
+   One capture takes BURST frames off the camera, scores each for
+   sharpness, and reads the sharpest PASSES of them. A value is kept when
+   AGREE of those readings match. A field read fewer times than that
+   shows no value, with the readings listed so the reason is visible.
+   Nothing unverified is ever presented as fact.
+
+   PICTURE PREPARATION, AND WHY THERE IS NONE
+
+   The strip goes to the reader in its original colour, untouched. Grey,
+   contrast stretching, sharpening and binarising were all tried and all
+   read worse on real photos: Tesseract converts and thresholds the image
+   itself, and it does that better from the original than from anything
+   already flattened by hand. The three switches below are off and should
+   stay off unless a card design genuinely needs them.
 -------------------------------------------------------------------*/
 var WANTED     = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
-var MIN_LABELS = 3;      // fewer found and the card is refused outright
-var CARD_RATIO = 1.5846; // ISO 7810 ID-1, 85.6 by 54 mm, the shape of a bank card
-var CROP_TOP   = 0.22;   // above this is cut off, the blue band
-var CROP_LEFT  = 0.30;   // left of this is cut off, the portrait
-var BURST      = 5;      // frames grabbed per capture
-var PASSES     = 2;      // sharpest frames actually read
-var MIN_SHARP  = 40;     // below this the picture is too soft to bother reading
-var OUT_WIDTH  = 2000;   // the strip is scaled to this before reading
+var MIN_LABELS = 3;       // fewer confirmed and the card is refused outright
+var CARD_RATIO = 1.5846;  // ISO 7810 ID-1, 85.6 by 54 mm, a bank card shape
+var CROP_TOP   = 0.22;    // above this is cut off, the blue band
+var CROP_LEFT  = 0.30;    // left of this is cut off, the portrait
+var BURST      = 6;       // frames taken per capture
+var PASSES     = 3;       // how many of the sharpest are read
+var AGREE      = 2;       // matching readings needed to keep a value
+var MIN_SHARP  = 18;      // below this the picture is refused as too soft
+var MIN_WIDTH  = 1200;    // small strips are enlarged to at least this
+var MAX_WIDTH  = 2000;    // large strips are never enlarged past this
+var GREY       = false;   // leave off, colour reads better
+var SHARPEN    = false;   // leave off, it read worse
+var BINARISE   = false;   // leave off, it lost thin text
 
 var worker = null, stream = null, track = null, torchOn = false;
 
@@ -208,7 +218,7 @@ function drawFrame(){
 video.addEventListener('loadedmetadata', drawFrame);
 window.addEventListener('resize', drawFrame);
 
-/* ---- camera, asked for as much resolution and steady focus as it will give ---- */
+/* ---- camera ---- */
 function startCamera(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
     noCamera('This browser will not give the page a camera.');
@@ -234,12 +244,12 @@ function startCamera(){
 function noCamera(msg){
   view.style.display = 'none';
   shootBtn.style.display = 'none';
-  say('err', msg + ' Allow the camera for this site in the browser settings, then reload. The card can only be read live through the frame.');
+  say('err', msg + ' Allow the camera for this site in the browser settings, then reload. The card is read live through the frame.');
 }
 function setupTorch(){
   try{
-    var caps = track.getCapabilities ? track.getCapabilities() : {};
-    if(caps && caps.torch){ torchBtn.style.display = 'block'; }
+    var caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    if(caps && caps.torch) torchBtn.style.display = 'block';
   }catch(e){ }
 }
 torchBtn.onclick = function(){
@@ -260,9 +270,10 @@ function grabStrip(){
   var sw = b.w * (1 - CROP_LEFT) * w;
   var sh = b.h * (1 - CROP_TOP) * h;
 
+  var target = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(sw)));
   var c = document.createElement('canvas');
-  c.width = OUT_WIDTH;
-  c.height = Math.max(1, Math.round(OUT_WIDTH * sh / sw));
+  c.width = target;
+  c.height = Math.max(1, Math.round(target * sh / sw));
   var ctx = c.getContext('2d');
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -270,13 +281,14 @@ function grabStrip(){
   return c;
 }
 
-/* ---- how sharp is it, measured as the spread of a Laplacian ---- */
+/* ---- how sharp is it, the spread of a Laplacian ---- */
 function sharpness(c){
   var w = 320, h = Math.max(1, Math.round(c.height * w / c.width));
   var s = document.createElement('canvas'); s.width = w; s.height = h;
-  s.getContext('2d').drawImage(c, 0, 0, w, h);
+  var sctx = s.getContext('2d');
+  sctx.drawImage(c, 0, 0, w, h);
   try{
-    var px = s.getContext('2d').getImageData(0, 0, w, h).data;
+    var px = sctx.getImageData(0, 0, w, h).data;
     var g = new Float32Array(w * h), i, j;
     for(i = 0; i < w * h; i++) g[i] = px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
     var sum = 0, sum2 = 0, n = 0;
@@ -290,72 +302,61 @@ function sharpness(c){
     if(!n) return 0;
     var mean = sum / n;
     return sum2 / n - mean * mean;
-  }catch(e){ return 0; }   // cannot measure it, so do not trust it
+  }catch(e){ return 0; }
 }
 
-/* ---- sharpen, then threshold against the local background ----
-   A card lit from one side is darker at one end, so a single cutoff
-   loses whole lines. The cutoff here follows the local average, which
-   is what turns uneven light into flat black on white.            */
-function enhance(c){
+/* ---- the strip as the camera saw it, unless a switch says otherwise ---- */
+function prepare(c){
+  if(!GREY && !SHARPEN && !BINARISE) return c;      // straight through, in colour
+
   var ctx = c.getContext('2d'), w = c.width, h = c.height;
   var d, px;
   try{ d = ctx.getImageData(0, 0, w, h); px = d.data; }catch(e){ return null; }
 
-  var n = w * h, i, x, y;
-  var g = new Float32Array(n);
-  for(i = 0; i < n; i++) g[i] = px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
-
-  // unsharp mask: subtract a soft copy to put the edges back
-  var blur = new Float32Array(n);
-  for(y = 0; y < h; y++){
-    for(x = 0; x < w; x++){
-      var x0 = x > 0 ? x - 1 : 0, x1 = x < w - 1 ? x + 1 : w - 1;
-      var y0 = y > 0 ? y - 1 : 0, y1 = y < h - 1 ? y + 1 : h - 1;
-      blur[y*w + x] = (g[y0*w+x0] + g[y0*w+x] + g[y0*w+x1] +
-                       g[y*w+x0]  + g[y*w+x]  + g[y*w+x1]  +
-                       g[y1*w+x0] + g[y1*w+x] + g[y1*w+x1]) / 9;
-    }
-  }
-  var sharp = new Float32Array(n);
+  var n = w * h, i, g;
+  var grey = new Uint8Array(n);
+  var hist = new Uint32Array(256);
   for(i = 0; i < n; i++){
-    var v = g[i] + 1.1 * (g[i] - blur[i]);
-    sharp[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+    g = (px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114) | 0;
+    grey[i] = g;
+    hist[g]++;
   }
 
-  // integral image, so the local average costs the same at any window size
-  var iw = w + 1;
-  var sum = new Uint32Array(iw * (h + 1));
-  for(y = 0; y < h; y++){
-    var rowAcc = 0;
-    for(x = 0; x < w; x++){
-      rowAcc += sharp[y*w + x] | 0;
-      sum[(y+1)*iw + (x+1)] = sum[y*iw + (x+1)] + rowAcc;
+  var cut = Math.round(n * 0.01), acc = 0, lo = 0, hi = 255;
+  for(i = 0; i < 256; i++){ acc += hist[i]; if(acc >= cut){ lo = i; break; } }
+  acc = 0;
+  for(i = 255; i >= 0; i--){ acc += hist[i]; if(acc >= cut){ hi = i; break; } }
+  if(hi - lo < 24){ lo = 0; hi = 255; }
+  var span = hi - lo;
+
+  var soft = null;
+  if(SHARPEN){
+    soft = new Float32Array(n);
+    var x, y;
+    for(y = 0; y < h; y++){
+      for(x = 0; x < w; x++){
+        var x0 = x > 0 ? x - 1 : 0, x1 = x < w - 1 ? x + 1 : w - 1;
+        var y0 = y > 0 ? y - 1 : 0, y1 = y < h - 1 ? y + 1 : h - 1;
+        soft[y*w + x] = (grey[y0*w+x0] + grey[y0*w+x] + grey[y0*w+x1] +
+                         grey[y*w+x0]  + grey[y*w+x]  + grey[y*w+x1]  +
+                         grey[y1*w+x0] + grey[y1*w+x] + grey[y1*w+x1]) / 9;
+      }
     }
   }
 
-  var win = Math.max(15, Math.round(w / 45)) | 1;   // window, odd
-  var half = (win - 1) / 2;
-  var bias = 8;                                     // how far below the local mean counts as ink
-  for(y = 0; y < h; y++){
-    var ay = y - half < 0 ? 0 : y - half;
-    var by = y + half > h - 1 ? h - 1 : y + half;
-    for(x = 0; x < w; x++){
-      var ax = x - half < 0 ? 0 : x - half;
-      var bx = x + half > w - 1 ? w - 1 : x + half;
-      var area = (bx - ax + 1) * (by - ay + 1);
-      var tot = sum[(by+1)*iw + (bx+1)] - sum[ay*iw + (bx+1)] - sum[(by+1)*iw + ax] + sum[ay*iw + ax];
-      var mean = tot / area;
-      var ink = sharp[y*w + x] < mean - bias ? 0 : 255;
-      var p = (y*w + x) * 4;
-      px[p] = px[p+1] = px[p+2] = ink; px[p+3] = 255;
-    }
+  for(i = 0; i < n; i++){
+    var base = SHARPEN ? grey[i] + 0.8 * (grey[i] - soft[i]) : grey[i];
+    var v = (base - lo) * 255 / span;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    if(BINARISE) v = v < 128 ? 0 : 255;
+    var p = i * 4;
+    px[p] = px[p+1] = px[p+2] = v; px[p+3] = 255;
   }
   ctx.putImageData(d, 0, 0);
   return c;
 }
 
-/* ---- a capture: burst, pick the sharpest, read them, compare ---- */
+/* ---- a capture: burst, keep the sharpest, read them, compare ---- */
 shootBtn.onclick = function(){
   if(!HAS_OCR){ say('err','The reader did not load. Reload the page once you have a connection.'); return; }
   if(!video.videoWidth){ say('err','The camera is not ready yet.'); return; }
@@ -371,8 +372,8 @@ shootBtn.onclick = function(){
     chain = chain.then(function(){
       var c = grabStrip();
       frames.push({ c: c, s: sharpness(c) });
-      progress(frames.length / (BURST + PASSES * 2));
-      return wait(110);
+      progress(frames.length / (BURST + PASSES * 3));
+      return wait(120);
     });
   }
 
@@ -384,13 +385,18 @@ shootBtn.onclick = function(){
       return null;
     }
 
-    var picks = frames.slice(0, PASSES).map(function(f){ return enhance(f.c); });
-    if(picks.some(function(p){ return !p; })){
-      progress(null); shootBtn.disabled = false;
-      say('err','The picture could not be prepared for reading on this phone, so nothing was read. Reload the page and try again.');
-      return null;
+    var picks = [];
+    for(var k = 0; k < Math.min(PASSES, frames.length); k++){
+      var p = prepare(frames[k].c);
+      if(!p){
+        progress(null); shootBtn.disabled = false;
+        say('err','The picture could not be prepared for reading on this phone, so nothing was read. Reload the page and try again.');
+        return null;
+      }
+      picks.push(p);
     }
-    shotImg.src = picks[0].toDataURL('image/jpeg', 0.9);
+
+    shotImg.src = picks[0].toDataURL('image/jpeg', 0.92);
     shot.style.display = 'block';
 
     return ready().then(function(w){
@@ -399,7 +405,7 @@ shootBtn.onclick = function(){
       picks.forEach(function(canvas, idx){
         seq = seq.then(function(){
           say('work','Reading, pass ' + (idx + 1) + ' of ' + picks.length + '...');
-          return w.recognize(canvas.toDataURL('image/jpeg', 0.92)).then(function(res){
+          return w.recognize(canvas.toDataURL('image/png')).then(function(res){
             results.push(res && res.data ? res.data : {});
           });
         });
@@ -422,13 +428,20 @@ function ready(){
   if(worker) return Promise.resolve(worker);
   say('work','Loading the reader for the first time, this takes a moment...');
   return Tesseract.createWorker('eng', 1, {
-    logger: function(m){ if(m && typeof m.progress === 'number') progress(0.5 + m.progress * 0.5); }
-  }).then(function(w){ worker = w; return w; });
+    logger: function(m){ if(m && typeof m.progress === 'number') progress(0.4 + m.progress * 0.5); }
+  }).then(function(w){
+    // the strip is one column of lines at mixed sizes, and the spaces in
+    // an address matter, so say so rather than take the defaults
+    return w.setParameters({
+      tessedit_pageseg_mode: '4',
+      preserve_interword_spaces: '1'
+    }).then(function(){ worker = w; return w; });
+  });
 }
 
 /* ---- label matching, one wrong character forgiven ---- */
 function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g, ''); }
-function same(a, b){ return String(a).toLowerCase().replace(/[^a-z0-9]/g, '') === String(b).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function keyOf(s){ return String(s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
 function near(a, b){
   a = norm(a); b = norm(b);
@@ -493,16 +506,15 @@ function fieldsOf(text){
     if(!parts) return;
     var wanted = null;
     WANTED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
-    if(!wanted || found[wanted]) return;          // Email, ID and everything else dropped
-    var value = tidy(wanted, parts.value);        // no borrowing from the next line
+    if(!wanted || found[wanted]) return;      // Email, ID and everything else dropped
+    var value = tidy(wanted, parts.value);    // no borrowing from the next line
     if(value) found[wanted] = value;
   });
   return { found: found, lines: lines };
 }
 
-/* ---- the two readings, side by side. A value is kept only when both
-        passes read it the same way. Read once, or read two different
-        ways, is not shown as a value at all.                       ---- */
+/* ---- the readings, side by side. The reading that appears AGREE times
+        or more wins. Anything below that keeps no value.           ---- */
 function compare(results){
   var reads = results.map(function(d){ return fieldsOf(d.text); });
   var merged = {}, confirmed = 0;
@@ -510,9 +522,21 @@ function compare(results){
   WANTED.forEach(function(key){
     var vals = reads.map(function(r){ return r.found[key]; }).filter(Boolean);
     if(!vals.length){ merged[key] = { value: '', state: 'missing' }; return; }
-    var agree = vals.length >= reads.length && vals.every(function(v){ return same(v, vals[0]); });
-    if(agree){
-      merged[key] = { value: vals[0], state: 'confirmed' };
+
+    var groups = {};
+    vals.forEach(function(v){
+      var k = keyOf(v);
+      if(!groups[k]) groups[k] = [];
+      groups[k].push(v);
+    });
+    var best = null;
+    Object.keys(groups).forEach(function(k){
+      if(best === null || groups[k].length > groups[best].length) best = k;
+    });
+
+    if(groups[best].length >= AGREE){
+      merged[key] = { value: groups[best][0], state: 'confirmed',
+                      votes: groups[best].length + ' of ' + reads.length };
       confirmed++;
     } else {
       merged[key] = { value: '', state: 'unconfirmed', readings: vals };
@@ -547,9 +571,9 @@ function show_fields(m){
 
     if(f.state === 'unconfirmed'){
       var n = document.createElement('div');
-      n.className = 'note clash';
+      n.className = 'note';
       n.textContent = f.readings.length > 1
-        ? 'the two passes read it differently: ' + f.readings.join('  |  ')
+        ? 'the passes read it differently: ' + f.readings.join('  |  ')
         : 'only one pass read it: ' + f.readings[0];
       row.appendChild(n);
     }
@@ -559,8 +583,8 @@ function show_fields(m){
   if(trouble.length){
     warn.style.display = 'block';
     warn.textContent = 'Retake the photo. Nothing is kept for: ' + trouble.join(', ') +
-      '. Only a field read the same way twice is shown. Hold the camera steady and square to the card, ' +
-      'fill the gold frame edge to edge, turn the light on if the room is dim, and keep any glare off the surface.';
+      '. Hold the camera steady and square to the card, fill the gold frame edge to edge, ' +
+      'turn the light on if the room is dim, and keep any glare off the surface.';
   } else {
     warn.style.display = 'none';
   }
@@ -569,16 +593,16 @@ function show_fields(m){
   out.style.display = 'block';
   say(trouble.length ? 'err' : 'good',
       trouble.length ? 'Please hold the camera well and take it again.'
-                     : 'All six fields read the same way twice.');
+                     : 'All six fields agreed across the readings.');
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function show_reject(lines, m, confirmed){
   var missing = WANTED.filter(function(w){ return !m[w] || m[w].state !== 'confirmed'; });
   why.textContent = confirmed === 0
-    ? 'Not one field was read the same way twice, so nothing was kept. If this is an ICF-SL card, hold the camera well and take it again with the whole card inside the frame.'
+    ? 'Nothing was read the same way twice, so nothing was kept. If this is an ICF-SL card, hold the camera well and take it again with the whole card inside the frame.'
     : 'Only ' + confirmed + ' of the six fields were confirmed. Not kept: ' + missing.join(', ') +
-      '. Retake it: hold the camera steady and square to the card, with the whole card inside the frame. Nothing was kept.';
+      '. Retake it: hold the camera steady and square to the card, with the whole card inside the frame.';
   seenList.innerHTML = '';
   (lines || []).slice(0, 12).forEach(function(t){
     var li = document.createElement('li'); li.textContent = t; seenList.appendChild(li);
