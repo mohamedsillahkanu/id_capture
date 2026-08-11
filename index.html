@@ -15,12 +15,13 @@
   --line:#c9d6e4;
   --bg:#eef3f8;
   --ok:#1c7c4a;
+  --warn:#8a6100;
   --bad:#b3261e;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
 body{background:var(--bg);font-family:'Roboto',Arial,sans-serif;color:var(--ink);font-size:15px;line-height:1.45}
-header{background:var(--navy);border-bottom:4px solid var(--gold);padding:14px 16px;position:sticky;top:0;z-index:5}
+header{background:var(--navy);border-bottom:4px solid var(--gold);padding:14px 16px}
 header h1{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#fff;margin:0;font-size:19px}
 header p{margin:2px 0 0;color:#cfe0f2;font-size:12px}
 main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
@@ -36,13 +37,12 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .btn+.btn{margin-top:8px}
 .btn[disabled]{opacity:.55;cursor:not-allowed}
 
-/* camera with the card frame drawn over it */
 .view{position:relative;background:#000;border-radius:2px;overflow:hidden;margin-bottom:12px;min-height:150px}
 .view video{width:100%;display:block}
 .frame{position:absolute;border:3px solid var(--gold);box-shadow:0 0 0 2000px rgba(0,0,0,.45);border-radius:4px;pointer-events:none}
 .frame b{position:absolute;left:0;right:0;bottom:-26px;text-align:center;color:#fff;font-family:'Oswald',sans-serif;font-size:12px;font-weight:400;letter-spacing:.5px;text-transform:uppercase}
 .hint{font-size:12.5px;color:#6b7a89;margin:12px 0 10px}
-.shot{border:2px dashed var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px;display:none}
+.shot{border:2px dashed var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px;display:none;background:#fff}
 .shot img{width:100%;display:block}
 
 .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:3px 7px;border-radius:2px;margin-bottom:10px}
@@ -52,11 +52,15 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .bar{height:6px;background:#dce6f0;border-radius:2px;overflow:hidden;margin-top:10px;display:none}
 .bar.show{display:block}
 .bar i{display:block;height:100%;width:0;background:var(--gold);transition:width .25s}
+
 .row{padding:9px 0;border-bottom:1px solid #e6edf4}
 .row:last-child{border-bottom:0}
 .row .k{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--navy)}
 .row .v{font-size:16px;font-weight:500;word-break:break-word;margin-top:1px}
 .row .v.none{color:var(--bad);font-weight:400;font-style:italic}
+.row .note{font-size:12px;margin-top:2px}
+.row .note.once{color:var(--warn)}
+.row .note.clash{color:var(--bad)}
 .warn{background:#fdeceb;border-left:4px solid var(--bad);color:var(--bad);padding:9px 10px;font-size:13px;margin:0 0 12px;display:none}
 .big{font-family:'Oswald',sans-serif;font-size:18px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin:0 0 6px}
 .why{font-size:13.5px;margin:0 0 10px}
@@ -73,6 +77,7 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 #out,#reject{display:none}
+#torch{display:none}
 </style>
 </head>
 <body>
@@ -90,7 +95,8 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
       <div class="frame" id="frame"><b>Whole card inside this frame</b></div>
     </div>
     <button class="btn gold" id="shoot">Capture and read</button>
-    <p class="hint">Fit the whole card inside the gold frame, edge to edge, and hold the phone square to it. Only what is inside the frame is read.</p>
+    <button class="btn ghost" id="torch">Light on</button>
+    <p class="hint">Fit the whole card inside the gold frame and hold still for a second while several frames are taken. The sharpest two are read and compared, and a field is only kept when both readings match.</p>
     <div id="engine" class="badge wait">Checking the reader</div>
     <div class="shot" id="shot"><img id="shotImg" alt="The strip that was read"></div>
     <div class="bar" id="bar"><i id="barFill"></i></div>
@@ -121,24 +127,32 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 /* ------------------------------------------------------------------
    WHAT THIS APP KEEPS
 
-   Six labelled lines and nothing else. Each value sits behind its own
-   label and a colon on the card, so nothing is inferred from size or
-   position, and a line with no wanted label is thrown away.
+   Six labelled lines and nothing else. The photograph is never turned
+   into text: the frame capture is trimmed to the text column before the
+   reader is called, so the portrait and the blue band are physically
+   absent from the image being read. CROP_TOP and CROP_LEFT match the
+   card template, so change them together if the layout changes.
 
-   The photograph is never turned into text. The frame crop is trimmed
-   down to the text column before the reader is called, so the portrait
-   and the blue band are physically not in the image it reads. The two
-   numbers below are where that trim starts and they match the card
-   template, so change them together if the card layout changes.
+   HOW IT GUARDS AGAINST A WRONG DIGIT
+
+   One capture takes BURST frames, scores each for sharpness, and reads
+   the sharpest PASSES of them. A field is kept only when both readings
+   agree. There is no fallback anywhere: read once, read two different
+   ways, too blurry to measure, or an image the phone cannot prepare all
+   stop the read and ask for another photo. Nothing degraded is ever
+   shown as a value.
 -------------------------------------------------------------------*/
-var WANTED      = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
-var MIN_LABELS  = 3;      // fewer than this and the card is refused outright
-var MIN_CONF    = 62;     // reader confidence below this asks for a retake
-var CARD_RATIO  = 1.6;    // card width divided by height, 1200 by 750
-var CROP_TOP    = 0.22;   // everything above this is cut off, the blue band
-var CROP_LEFT   = 0.30;   // everything left of this is cut off, the portrait
+var WANTED     = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
+var MIN_LABELS = 3;      // fewer found and the card is refused outright
+var CARD_RATIO = 1.5846; // ISO 7810 ID-1, 85.6 by 54 mm, the shape of a bank card
+var CROP_TOP   = 0.22;   // above this is cut off, the blue band
+var CROP_LEFT  = 0.30;   // left of this is cut off, the portrait
+var BURST      = 5;      // frames grabbed per capture
+var PASSES     = 2;      // sharpest frames actually read
+var MIN_SHARP  = 40;     // below this the picture is too soft to bother reading
+var OUT_WIDTH  = 2000;   // the strip is scaled to this before reading
 
-var worker = null, stream = null, lastURL = null;
+var worker = null, stream = null, track = null, torchOn = false;
 
 var view = document.getElementById('view');
 var video = document.getElementById('video');
@@ -153,6 +167,7 @@ var reject = document.getElementById('reject');
 var why = document.getElementById('why');
 var seenList = document.getElementById('seenList');
 var shootBtn = document.getElementById('shoot');
+var torchBtn = document.getElementById('torch');
 var engine = document.getElementById('engine');
 var bar = document.getElementById('bar');
 var barFill = document.getElementById('barFill');
@@ -173,9 +188,9 @@ function progress(p){
   barFill.style.width = Math.round(p * 100) + '%';
 }
 function hidePanels(){ out.style.display = 'none'; reject.style.display = 'none'; }
+function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-/* ---- the frame, in fractions of the picture, used for both the
-        overlay you see and the crop that is actually read ---- */
+/* ---- the frame, in fractions, used for the overlay and the crop ---- */
 function frameBox(w, h){
   var fw = w * 0.94, fh = fw / CARD_RATIO;
   if(fh > h * 0.88){ fh = h * 0.88; fw = fh * CARD_RATIO; }
@@ -193,17 +208,25 @@ function drawFrame(){
 video.addEventListener('loadedmetadata', drawFrame);
 window.addEventListener('resize', drawFrame);
 
+/* ---- camera, asked for as much resolution and steady focus as it will give ---- */
 function startCamera(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
     noCamera('This browser will not give the page a camera.');
     return;
   }
   navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 2560 },
+      height: { ideal: 1440 },
+      focusMode: { ideal: 'continuous' }
+    },
     audio: false
   }).then(function(s){
     stream = s;
+    track = s.getVideoTracks()[0];
     video.srcObject = s;
+    setupTorch();
     return video.play();
   }).then(drawFrame)
     .catch(function(e){ noCamera('The camera could not start. ' + (e && e.message ? e.message : e)); });
@@ -213,101 +236,199 @@ function noCamera(msg){
   shootBtn.style.display = 'none';
   say('err', msg + ' Allow the camera for this site in the browser settings, then reload. The card can only be read live through the frame.');
 }
+function setupTorch(){
+  try{
+    var caps = track.getCapabilities ? track.getCapabilities() : {};
+    if(caps && caps.torch){ torchBtn.style.display = 'block'; }
+  }catch(e){ }
+}
+torchBtn.onclick = function(){
+  if(!track) return;
+  torchOn = !torchOn;
+  track.applyConstraints({ advanced: [{ torch: torchOn }] })
+    .then(function(){ torchBtn.textContent = torchOn ? 'Light off' : 'Light on'; })
+    .catch(function(){ torchOn = false; torchBtn.style.display = 'none'; });
+};
 startCamera();
 
-shootBtn.onclick = function(){
-  if(!video.videoWidth){ say('err','The camera is not ready yet.'); return; }
-  var w = video.videoWidth, h = video.videoHeight, b = frameBox(w, h);
-  var c = document.createElement('canvas');
-  var outW = 1800, outH = Math.round(outW / CARD_RATIO);
-  c.width = outW; c.height = outH;
-  c.getContext('2d').drawImage(video, b.x * w, b.y * h, b.w * w, b.h * h, 0, 0, outW, outH);
-  readCanvas(c);
-};
-
-/* keep only the text column: the photograph and the band are cut away
-   before the reader sees anything, then the crop is enlarged, greyed
-   and its contrast stretched */
-function textOnly(src){
-  var w = src.width, h = src.height;
-  var sx = Math.round(w * CROP_LEFT), sy = Math.round(h * CROP_TOP);
-  var sw = w - sx, sh = h - sy;
-  var scale = 1.4;
+/* ---- one frame, cropped straight to the text column ---- */
+function grabStrip(){
+  var w = video.videoWidth, h = video.videoHeight;
+  var b = frameBox(w, h);
+  var sx = (b.x + b.w * CROP_LEFT) * w;
+  var sy = (b.y + b.h * CROP_TOP) * h;
+  var sw = b.w * (1 - CROP_LEFT) * w;
+  var sh = b.h * (1 - CROP_TOP) * h;
 
   var c = document.createElement('canvas');
-  c.width = Math.round(sw * scale);
-  c.height = Math.round(sh * scale);
+  c.width = OUT_WIDTH;
+  c.height = Math.max(1, Math.round(OUT_WIDTH * sh / sw));
   var ctx = c.getContext('2d');
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
-
-  try{
-    var d = ctx.getImageData(0, 0, c.width, c.height), px = d.data, lo = 255, hi = 0, i, g;
-    for(i = 0; i < px.length; i += 4){
-      g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
-      px[i] = px[i+1] = px[i+2] = g;
-      if(g < lo) lo = g;
-      if(g > hi) hi = g;
-    }
-    var span = Math.max(1, hi - lo), v;
-    for(i = 0; i < px.length; i += 4){
-      v = (px[i] - lo) * 255 / span;
-      px[i] = px[i+1] = px[i+2] = v < 0 ? 0 : v > 255 ? 255 : v;
-    }
-    ctx.putImageData(d, 0, 0);
-  }catch(e){ }
-
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
   return c;
 }
 
-function readCanvas(c){
-  if(!HAS_OCR){ say('err','The reader did not load. Reload the page once you have a connection.'); return; }
-  var zone = textOnly(c);
-  lastURL = zone.toDataURL('image/jpeg', 0.92);
-  shotImg.src = lastURL;
-  shot.style.display = 'block';
-  hidePanels();
-  shootBtn.disabled = true;
-  say('work','Reading the card...');
-  progress(0);
-
-  ready()
-    .then(function(w){ return w.recognize(lastURL); })
-    .then(function(res){
-      progress(null);
-      shootBtn.disabled = false;
-      var data = (res && res.data) || {};
-      var conf = typeof data.confidence === 'number' ? data.confidence : 100;
-      var lines = String(data.text || '')
-                    .split('\n')
-                    .map(function(t){ return t.replace(/\s+/g, ' ').trim(); })
-                    .filter(function(t){ return t.length > 1; });
-      if(!lines.length){
-        say('err','No text was found inside the frame. Fill the frame with the card and try again.');
-        return;
+/* ---- how sharp is it, measured as the spread of a Laplacian ---- */
+function sharpness(c){
+  var w = 320, h = Math.max(1, Math.round(c.height * w / c.width));
+  var s = document.createElement('canvas'); s.width = w; s.height = h;
+  s.getContext('2d').drawImage(c, 0, 0, w, h);
+  try{
+    var px = s.getContext('2d').getImageData(0, 0, w, h).data;
+    var g = new Float32Array(w * h), i, j;
+    for(i = 0; i < w * h; i++) g[i] = px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
+    var sum = 0, sum2 = 0, n = 0;
+    for(j = 1; j < h - 1; j++){
+      for(i = 1; i < w - 1; i++){
+        var k = j*w + i;
+        var lap = 4*g[k] - g[k-1] - g[k+1] - g[k-w] - g[k+w];
+        sum += lap; sum2 += lap*lap; n++;
       }
-      verdict(lines, conf);
-    })
-    .catch(function(e){
-      progress(null);
-      shootBtn.disabled = false;
-      say('err','Could not read the card. ' + (e && e.message ? e.message : e));
-    });
+    }
+    if(!n) return 0;
+    var mean = sum / n;
+    return sum2 / n - mean * mean;
+  }catch(e){ return 0; }   // cannot measure it, so do not trust it
 }
+
+/* ---- sharpen, then threshold against the local background ----
+   A card lit from one side is darker at one end, so a single cutoff
+   loses whole lines. The cutoff here follows the local average, which
+   is what turns uneven light into flat black on white.            */
+function enhance(c){
+  var ctx = c.getContext('2d'), w = c.width, h = c.height;
+  var d, px;
+  try{ d = ctx.getImageData(0, 0, w, h); px = d.data; }catch(e){ return null; }
+
+  var n = w * h, i, x, y;
+  var g = new Float32Array(n);
+  for(i = 0; i < n; i++) g[i] = px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
+
+  // unsharp mask: subtract a soft copy to put the edges back
+  var blur = new Float32Array(n);
+  for(y = 0; y < h; y++){
+    for(x = 0; x < w; x++){
+      var x0 = x > 0 ? x - 1 : 0, x1 = x < w - 1 ? x + 1 : w - 1;
+      var y0 = y > 0 ? y - 1 : 0, y1 = y < h - 1 ? y + 1 : h - 1;
+      blur[y*w + x] = (g[y0*w+x0] + g[y0*w+x] + g[y0*w+x1] +
+                       g[y*w+x0]  + g[y*w+x]  + g[y*w+x1]  +
+                       g[y1*w+x0] + g[y1*w+x] + g[y1*w+x1]) / 9;
+    }
+  }
+  var sharp = new Float32Array(n);
+  for(i = 0; i < n; i++){
+    var v = g[i] + 1.1 * (g[i] - blur[i]);
+    sharp[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+
+  // integral image, so the local average costs the same at any window size
+  var iw = w + 1;
+  var sum = new Uint32Array(iw * (h + 1));
+  for(y = 0; y < h; y++){
+    var rowAcc = 0;
+    for(x = 0; x < w; x++){
+      rowAcc += sharp[y*w + x] | 0;
+      sum[(y+1)*iw + (x+1)] = sum[y*iw + (x+1)] + rowAcc;
+    }
+  }
+
+  var win = Math.max(15, Math.round(w / 45)) | 1;   // window, odd
+  var half = (win - 1) / 2;
+  var bias = 8;                                     // how far below the local mean counts as ink
+  for(y = 0; y < h; y++){
+    var ay = y - half < 0 ? 0 : y - half;
+    var by = y + half > h - 1 ? h - 1 : y + half;
+    for(x = 0; x < w; x++){
+      var ax = x - half < 0 ? 0 : x - half;
+      var bx = x + half > w - 1 ? w - 1 : x + half;
+      var area = (bx - ax + 1) * (by - ay + 1);
+      var tot = sum[(by+1)*iw + (bx+1)] - sum[ay*iw + (bx+1)] - sum[(by+1)*iw + ax] + sum[ay*iw + ax];
+      var mean = tot / area;
+      var ink = sharp[y*w + x] < mean - bias ? 0 : 255;
+      var p = (y*w + x) * 4;
+      px[p] = px[p+1] = px[p+2] = ink; px[p+3] = 255;
+    }
+  }
+  ctx.putImageData(d, 0, 0);
+  return c;
+}
+
+/* ---- a capture: burst, pick the sharpest, read them, compare ---- */
+shootBtn.onclick = function(){
+  if(!HAS_OCR){ say('err','The reader did not load. Reload the page once you have a connection.'); return; }
+  if(!video.videoWidth){ say('err','The camera is not ready yet.'); return; }
+
+  shootBtn.disabled = true;
+  hidePanels();
+  progress(0);
+  say('work','Hold still, taking ' + BURST + ' frames...');
+
+  var frames = [];
+  var chain = Promise.resolve();
+  for(var i = 0; i < BURST; i++){
+    chain = chain.then(function(){
+      var c = grabStrip();
+      frames.push({ c: c, s: sharpness(c) });
+      progress(frames.length / (BURST + PASSES * 2));
+      return wait(110);
+    });
+  }
+
+  chain.then(function(){
+    frames.sort(function(a, b){ return b.s - a.s; });
+    if(frames[0].s < MIN_SHARP){
+      progress(null); shootBtn.disabled = false;
+      say('err','That was too blurry to read. Please hold the camera well, keep it square to the card, and try again.');
+      return null;
+    }
+
+    var picks = frames.slice(0, PASSES).map(function(f){ return enhance(f.c); });
+    if(picks.some(function(p){ return !p; })){
+      progress(null); shootBtn.disabled = false;
+      say('err','The picture could not be prepared for reading on this phone, so nothing was read. Reload the page and try again.');
+      return null;
+    }
+    shotImg.src = picks[0].toDataURL('image/jpeg', 0.9);
+    shot.style.display = 'block';
+
+    return ready().then(function(w){
+      var results = [];
+      var seq = Promise.resolve();
+      picks.forEach(function(canvas, idx){
+        seq = seq.then(function(){
+          say('work','Reading, pass ' + (idx + 1) + ' of ' + picks.length + '...');
+          return w.recognize(canvas.toDataURL('image/jpeg', 0.92)).then(function(res){
+            results.push(res && res.data ? res.data : {});
+          });
+        });
+      });
+      return seq.then(function(){ return results; });
+    });
+  }).then(function(results){
+    progress(null);
+    shootBtn.disabled = false;
+    if(!results) return;
+    compare(results);
+  }).catch(function(e){
+    progress(null);
+    shootBtn.disabled = false;
+    say('err','Could not read the card. ' + (e && e.message ? e.message : e));
+  });
+};
 
 function ready(){
   if(worker) return Promise.resolve(worker);
   say('work','Loading the reader for the first time, this takes a moment...');
   return Tesseract.createWorker('eng', 1, {
-    logger: function(m){ if(m && typeof m.progress === 'number') progress(m.progress); }
+    logger: function(m){ if(m && typeof m.progress === 'number') progress(0.5 + m.progress * 0.5); }
   }).then(function(w){ worker = w; return w; });
 }
 
-/* ---- loose label matching, one wrong character forgiven ---- */
+/* ---- label matching, one wrong character forgiven ---- */
 function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g, ''); }
+function same(a, b){ return String(a).toLowerCase().replace(/[^a-z0-9]/g, '') === String(b).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
 function near(a, b){
   a = norm(a); b = norm(b);
@@ -335,10 +456,6 @@ function splitLabel(line){
   return { label: label, value: line.slice(at + 1).trim() };
 }
 
-/* ---- scrape the scraps off the end of a value ----
-   Stray marks from the card edge or the lamination land as one or two
-   loose characters after the real text, so they are cut off, and the
-   two fields with a known shape are matched on that shape.        */
 function tidy(key, v){
   v = v.replace(/[|_~`\^\[\]{}<>]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -353,87 +470,117 @@ function tidy(key, v){
   if(key === 'Tel'){
     var m = v.match(/\+?\s?\d[\d\s().-]{6,}/);
     if(m) v = m[0].trim();
-    v = v.replace(/(\d{3,4})\s+\d{1,2}$/, '$1');       // a loose digit after a full number
-    v = v.replace(/[\s.-]+$/, '');
+    v = v.replace(/(\d{3,4})\s+\d{1,2}$/, '$1').replace(/[\s.-]+$/, '');
   }
-
   if(key === 'Valid'){
     var m2 = v.match(/[A-Za-z]{3,}\s*\d{4}\s*(?:-|–|—|to)\s*[A-Za-z]{3,}\s*\d{4}/);
     if(m2) v = m2[0].replace(/\s*(-|–|—)\s*/, '-').trim();
   }
-
   if(key === 'Name' || key === 'Position' || key === 'Dept'){
     v = v.replace(/[^A-Za-z)'.\-]+$/, '').trim();
   }
-
   return v;
 }
 
-/* ---- keep the six, then accept, warn, or refuse ---- */
-function verdict(lines, conf){
-  var found = {}, hits = 0, i;
-
-  for(i = 0; i < lines.length; i++){
-    var parts = splitLabel(lines[i]);
-    if(!parts) continue;
-
+/* one reading: the six fields, or fewer */
+function fieldsOf(text){
+  var lines = String(text || '').split('\n')
+                .map(function(t){ return t.replace(/\s+/g, ' ').trim(); })
+                .filter(function(t){ return t.length > 1; });
+  var found = {};
+  lines.forEach(function(line){
+    var parts = splitLabel(line);
+    if(!parts) return;
     var wanted = null;
     WANTED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
-    if(!wanted || found[wanted]) continue;      // Email, ID and anything else are dropped
-
-    // No borrowing from the next line. A label whose own value was cut
-    // off stays empty rather than stealing the line below it, which is
-    // how a Name once ended up holding the position.
-    var value = tidy(wanted, parts.value);
-    if(!value) continue;
-
-    found[wanted] = value;
-    hits++;
-  }
-
-  if(hits < MIN_LABELS){ show_reject(lines, found, hits); return; }
-  show_fields(found, conf);
+    if(!wanted || found[wanted]) return;          // Email, ID and everything else dropped
+    var value = tidy(wanted, parts.value);        // no borrowing from the next line
+    if(value) found[wanted] = value;
+  });
+  return { found: found, lines: lines };
 }
 
-function show_fields(found, conf){
-  rows.innerHTML = '';
-  var missing = [];
+/* ---- the two readings, side by side. A value is kept only when both
+        passes read it the same way. Read once, or read two different
+        ways, is not shown as a value at all.                       ---- */
+function compare(results){
+  var reads = results.map(function(d){ return fieldsOf(d.text); });
+  var merged = {}, confirmed = 0;
+
   WANTED.forEach(function(key){
+    var vals = reads.map(function(r){ return r.found[key]; }).filter(Boolean);
+    if(!vals.length){ merged[key] = { value: '', state: 'missing' }; return; }
+    var agree = vals.length >= reads.length && vals.every(function(v){ return same(v, vals[0]); });
+    if(agree){
+      merged[key] = { value: vals[0], state: 'confirmed' };
+      confirmed++;
+    } else {
+      merged[key] = { value: '', state: 'unconfirmed', readings: vals };
+    }
+  });
+
+  if(confirmed < MIN_LABELS){ show_reject(reads[0].lines, merged, confirmed); return; }
+  show_fields(merged);
+}
+
+function show_fields(m){
+  rows.innerHTML = '';
+  var trouble = [];
+
+  WANTED.forEach(function(key){
+    var f = m[key];
     var row = document.createElement('div'); row.className = 'row';
     var k = document.createElement('div'); k.className = 'k'; k.textContent = key;
+    row.appendChild(k);
+
     var v = document.createElement('div');
-    if(found[key]){ v.className = 'v'; v.textContent = found[key]; }
-    else { v.className = 'v none'; v.textContent = 'not read'; missing.push(key); }
-    row.appendChild(k); row.appendChild(v);
+    if(f.state === 'confirmed'){
+      v.className = 'v'; v.textContent = f.value;
+    } else if(f.state === 'missing'){
+      v.className = 'v none'; v.textContent = 'not captured';
+      trouble.push(key);
+    } else {
+      v.className = 'v none'; v.textContent = 'not confirmed';
+      trouble.push(key);
+    }
+    row.appendChild(v);
+
+    if(f.state === 'unconfirmed'){
+      var n = document.createElement('div');
+      n.className = 'note clash';
+      n.textContent = f.readings.length > 1
+        ? 'the two passes read it differently: ' + f.readings.join('  |  ')
+        : 'only one pass read it: ' + f.readings[0];
+      row.appendChild(n);
+    }
     rows.appendChild(row);
   });
 
-  var blurry = conf < MIN_CONF;
-  if(missing.length || blurry){
+  if(trouble.length){
     warn.style.display = 'block';
-    warn.textContent = 'Retake the photo. ' +
-      (missing.length ? 'Not captured: ' + missing.join(', ') + '. ' : 'The photo is not clear enough to trust. ') +
-      'Hold the camera steady and square to the card, fill the gold frame edge to edge, and keep the light off the surface.';
+    warn.textContent = 'Retake the photo. Nothing is kept for: ' + trouble.join(', ') +
+      '. Only a field read the same way twice is shown. Hold the camera steady and square to the card, ' +
+      'fill the gold frame edge to edge, turn the light on if the room is dim, and keep any glare off the surface.';
   } else {
     warn.style.display = 'none';
   }
 
   reject.style.display = 'none';
   out.style.display = 'block';
-  say(missing.length || blurry ? 'err' : 'good',
-      missing.length || blurry ? 'Please hold the camera well and take it again.'
-                              : 'All six fields read, reader confidence ' + Math.round(conf) + ' percent.');
+  say(trouble.length ? 'err' : 'good',
+      trouble.length ? 'Please hold the camera well and take it again.'
+                     : 'All six fields read the same way twice.');
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-function show_reject(lines, found, hits){
-  var missing = WANTED.filter(function(w){ return !found[w]; });
-  why.textContent = hits === 0
-    ? 'Not one of the six labelled fields was found, so this is not an ICF-SL staff card. If it is, hold the camera well and take it again with the whole card inside the frame.'
-    : 'Only ' + hits + ' of the six fields were found. Not captured: ' + missing.join(', ') +
+function show_reject(lines, m, confirmed){
+  var missing = WANTED.filter(function(w){ return !m[w] || m[w].state !== 'confirmed'; });
+  why.textContent = confirmed === 0
+    ? 'Not one field was read the same way twice, so nothing was kept. If this is an ICF-SL card, hold the camera well and take it again with the whole card inside the frame.'
+    : 'Only ' + confirmed + ' of the six fields were confirmed. Not kept: ' + missing.join(', ') +
       '. Retake it: hold the camera steady and square to the card, with the whole card inside the frame. Nothing was kept.';
   seenList.innerHTML = '';
-  lines.slice(0, 12).forEach(function(t){
+  (lines || []).slice(0, 12).forEach(function(t){
     var li = document.createElement('li'); li.textContent = t; seenList.appendChild(li);
   });
   out.style.display = 'none';
