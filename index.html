@@ -25,7 +25,9 @@ header h1{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:.5px;te
 header p{margin:2px 0 0;color:#cfe0f2;font-size:12px}
 main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .card{background:#fff;border:2px solid var(--navy);outline:1px solid var(--navy);outline-offset:3px;border-radius:2px;padding:14px;margin:0 0 22px}
+.card.reject{border-color:var(--bad);outline-color:var(--bad)}
 .card h2{font-family:'Oswald',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:.6px;font-size:14px;color:var(--navy);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.card.reject h2{color:var(--bad);border-bottom-color:#e0a6a2}
 .shot{border:2px dashed var(--line);border-radius:2px;min-height:160px;display:flex;align-items:center;justify-content:center;background:#f7fafd;overflow:hidden;margin-bottom:10px}
 .shot span{font-size:13px;color:#6b7a89;padding:16px;text-align:center}
 .shot img{width:100%;display:block}
@@ -47,10 +49,13 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .row:last-child{border-bottom:0}
 .row .k{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--navy)}
 .row .v{font-size:16px;font-weight:500;word-break:break-word;margin-top:1px}
-.loose{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
-.loose h3{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:#6b7a89;margin:0 0 6px}
-.loose ul{margin:0;padding-left:18px}
-.loose li{font-size:14px;margin-bottom:3px;word-break:break-word}
+.row .v.none{color:var(--bad);font-weight:400;font-style:italic}
+.big{font-family:'Oswald',sans-serif;font-size:18px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin:0 0 6px}
+.why{font-size:13.5px;margin:0 0 10px}
+.seen{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.seen h3{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:#6b7a89;margin:0 0 6px}
+.seen ul{margin:0;padding-left:18px}
+.seen li{font-size:13px;margin-bottom:3px;word-break:break-word;color:#4a5b6b}
 .status{margin-top:10px;font-size:13px;padding:9px 10px;border-radius:2px;display:none}
 .status.show{display:block}
 .status.work{background:#e8f0f8;color:var(--navy)}
@@ -59,14 +64,14 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
 .spin{width:14px;height:14px;border:2px solid #b9cde2;border-top-color:var(--navy);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:6px;animation:sp .7s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
-#out{display:none}
+#out,#reject{display:none}
 </style>
 </head>
 <body>
 
 <header>
   <h1>ID Capture</h1>
-  <p>Reads the card in the browser</p>
+  <p>ICF-SL staff cards</p>
 </header>
 
 <main>
@@ -84,27 +89,51 @@ main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
   </div>
 
   <div class="card" id="out">
-    <h2>What the card says</h2>
+    <h2>Card details</h2>
     <div id="rows"></div>
-    <div class="loose" id="loose" style="display:none">
-      <h3>Text with no label</h3>
-      <ul id="looseList"></ul>
-    </div>
     <button class="btn ghost" id="reset" style="margin-top:14px">Read another card</button>
+  </div>
+
+  <div class="card reject" id="reject">
+    <h2>Card not accepted</h2>
+    <p class="big">Wrong ID</p>
+    <p class="why" id="why"></p>
+    <div class="seen" id="seen">
+      <h3>Text the reader picked up</h3>
+      <ul id="seenList"></ul>
+    </div>
+    <button class="btn ghost" id="reset2" style="margin-top:14px">Try again</button>
   </div>
 
 </main>
 
 <script>
-var imgURL = null;                 // data URL of the cleaned up photo
-var worker = null;                 // the Tesseract worker, made once and kept
+/* ------------------------------------------------------------------
+   WHAT THIS APP ACCEPTS
+
+   LABELLED   read from the text after the colon
+   UNLABELLED found by size and position, because they carry no colon
+   MIN_LABELS how many of the labelled fields must be found before the
+              card counts as an ICF-SL card at all. Below this the app
+              says Wrong ID and keeps nothing.
+   Anything else printed on the card is ignored, including Email, ID
+   and the organisation name in the blue band.
+-------------------------------------------------------------------*/
+var LABELLED   = ['Dept', 'Tel', 'Address', 'Valid'];
+var UNLABELLED = ['Name', 'Position'];
+var ORDER      = ['Name', 'Position', 'Dept', 'Tel', 'Address', 'Valid'];
+var MIN_LABELS = 2;
+var TOP_STRIP  = 0.20;   // the blue band, ignored when hunting for the name
+
+var imgURL = null, imgH = 0, worker = null;
 var shot = document.getElementById('shot');
 var file = document.getElementById('file');
 var st   = document.getElementById('st');
 var out  = document.getElementById('out');
 var rows = document.getElementById('rows');
-var loose = document.getElementById('loose');
-var looseList = document.getElementById('looseList');
+var reject = document.getElementById('reject');
+var why = document.getElementById('why');
+var seenList = document.getElementById('seenList');
 var readBtn = document.getElementById('read');
 var engine = document.getElementById('engine');
 var bar = document.getElementById('bar');
@@ -112,9 +141,8 @@ var barFill = document.getElementById('barFill');
 
 var HAS_OCR = typeof Tesseract !== 'undefined';
 engine.className = 'badge ' + (HAS_OCR ? 'on' : 'off');
-engine.textContent = HAS_OCR
-  ? 'Reader loaded, runs in the browser'
-  : 'Reader did not load, check the connection and reload';
+engine.textContent = HAS_OCR ? 'Reader loaded, runs in the browser'
+                             : 'Reader did not load, check the connection and reload';
 
 function say(kind, html){
   st.className = 'status show ' + kind;
@@ -126,6 +154,7 @@ function progress(p){
   bar.className = 'bar show';
   barFill.style.width = Math.round(p * 100) + '%';
 }
+function hidePanels(){ out.style.display = 'none'; reject.style.display = 'none'; }
 
 document.getElementById('snap').onclick = function(){
   file.setAttribute('capture','environment'); file.value = ''; file.click();
@@ -137,17 +166,16 @@ document.getElementById('pick').onclick = function(){
 file.onchange = function(){
   var f = file.files && file.files[0];
   if(!f) return;
-  clear(); out.style.display = 'none'; progress(null);
-  prepare(f, function(url){
-    imgURL = url;
+  clear(); hidePanels(); progress(null);
+  prepare(f, function(url, h){
+    imgURL = url; imgH = h;
     shot.innerHTML = '<img src="' + url + '" alt="Captured card">';
     readBtn.disabled = !HAS_OCR;
     if(!HAS_OCR) say('err','The reader did not load, so the card cannot be read. Reload the page once you have a connection.');
   }, function(msg){ say('err', msg); });
 };
 
-/* Resize to 1800px on the long side, then grey it and stretch the contrast.
-   Tesseract reads flat black on white far better than a colour photograph. */
+/* Resize to 1800px on the long side, grey it, stretch the contrast. */
 function prepare(f, done, fail){
   var r = new FileReader();
   r.onerror = function(){ fail('Could not read that file. Try taking the photo again.'); };
@@ -160,26 +188,23 @@ function prepare(f, done, fail){
       var c = document.createElement('canvas'); c.width = w; c.height = h;
       var ctx = c.getContext('2d');
       ctx.drawImage(im, 0, 0, w, h);
-
       try{
-        var d = ctx.getImageData(0, 0, w, h), px = d.data;
-        var lo = 255, hi = 0, i;
+        var d = ctx.getImageData(0, 0, w, h), px = d.data, lo = 255, hi = 0, i, g;
         for(i = 0; i < px.length; i += 4){
-          var g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
+          g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
           px[i] = px[i+1] = px[i+2] = g;
           if(g < lo) lo = g;
           if(g > hi) hi = g;
         }
-        var span = Math.max(1, hi - lo);
+        var span = Math.max(1, hi - lo), v;
         for(i = 0; i < px.length; i += 4){
-          var v = (px[i] - lo) * 255 / span;
+          v = (px[i] - lo) * 255 / span;
           v = v < 0 ? 0 : v > 255 ? 255 : v;
           px[i] = px[i+1] = px[i+2] = v;
         }
         ctx.putImageData(d, 0, 0);
-      }catch(e){ /* a tainted canvas would land here, the colour photo still reads */ }
-
-      done(c.toDataURL('image/jpeg', 0.92));
+      }catch(e){ }
+      done(c.toDataURL('image/jpeg', 0.92), h);
     };
     im.src = r.result;
   };
@@ -189,26 +214,21 @@ function prepare(f, done, fail){
 readBtn.onclick = function(){
   if(!imgURL || !HAS_OCR) return;
   readBtn.disabled = true;
+  hidePanels();
   say('work','Reading the card...');
   progress(0);
 
   ready()
-    .then(function(w){ return w.recognize(imgURL); })
+    .then(function(w){ return w.recognize(imgURL, {}, { text: true, blocks: true }); })
     .then(function(res){
       progress(null);
       readBtn.disabled = false;
-      var text = (res && res.data && res.data.text) || '';
-      var parsed = parse(text.split('\n'));
-      if(!parsed.fields.length && !parsed.loose.length){
+      var lines = linesFrom(res && res.data);
+      if(!lines.length){
         say('err','No text was found. Move closer, hold the card flat, and keep the light off the surface.');
         return;
       }
-      show(parsed);
-      say(parsed.fields.length ? 'good' : 'err',
-          parsed.fields.length
-            ? parsed.fields.length + ' labelled fields found' + (parsed.loose.length ? ', plus ' + parsed.loose.length + ' lines with no label.' : '.')
-            : 'Text was found but no labels. The lines are listed below.');
-      out.scrollIntoView({behavior:'smooth', block:'start'});
+      verdict(lines);
     })
     .catch(function(e){
       progress(null);
@@ -217,8 +237,6 @@ readBtn.onclick = function(){
     });
 };
 
-/* One worker, made on the first read and kept for the rest of the session.
-   The first card pays for the download of the engine and the English data. */
 function ready(){
   if(worker) return Promise.resolve(worker);
   say('work','Loading the reader for the first time, this takes a moment...');
@@ -227,75 +245,173 @@ function ready(){
   }).then(function(w){ worker = w; return w; });
 }
 
-/* ---- label before the colon, value after it ----
-   A colon only counts when the part before it is short and looks like a label,
-   so 12:30 and http:// stay intact. A label whose value sits on the next line
-   picks that line up.                                                        */
-function parse(lines){
-  var clean = lines.map(function(l){ return String(l).replace(/\s+/g,' ').trim(); })
-                   .filter(function(l){ return l.length > 1; });
-  var fields = [], looseLines = [], used = {};
-
-  clean.forEach(function(line, i){
-    if(used[i]) return;
-    var at = line.indexOf(':');
-    var label = at > -1 ? line.slice(0, at).trim() : '';
-    var value = at > -1 ? line.slice(at + 1).trim() : '';
-    var looksLikeLabel = at > 0 && label.length <= 24 && /[A-Za-z]/.test(label) &&
-                         !/[@\/]/.test(label) && !/^\d+$/.test(label);
-
-    if(!looksLikeLabel){ looseLines.push(line); return; }
-
-    if(!value && clean[i+1] !== undefined && clean[i+1].indexOf(':') === -1){
-      value = clean[i+1];
-      used[i+1] = true;
-    }
-    fields.push({ label: label, value: value });
-  });
-
-  var seen = {}, merged = [];
-  fields.forEach(function(f){
-    var key = f.label.toLowerCase();
-    if(seen[key] !== undefined){
-      if(f.value) merged[seen[key]].value = (merged[seen[key]].value + ' ' + f.value).trim();
-    } else {
-      seen[key] = merged.length;
-      merged.push(f);
-    }
-  });
-
-  return { fields: merged, loose: looseLines };
+/* ---- lines, with their height and position when the engine gives them ---- */
+function linesFrom(data){
+  var lines = [];
+  if(data && data.blocks && data.blocks.length){
+    data.blocks.forEach(function(b){
+      (b.paragraphs || []).forEach(function(p){
+        (p.lines || []).forEach(function(l){
+          var t = String(l.text || '').replace(/\s+/g, ' ').trim();
+          if(!t) return;
+          var bb = l.bbox || {};
+          var y0 = typeof bb.y0 === 'number' ? bb.y0 : null;
+          var y1 = typeof bb.y1 === 'number' ? bb.y1 : null;
+          lines.push({
+            text: t,
+            top: y0,
+            mid: (y0 !== null && y1 !== null) ? (y0 + y1) / 2 : null,
+            h: (y0 !== null && y1 !== null) ? (y1 - y0) : null
+          });
+        });
+      });
+    });
+  }
+  if(!lines.length && data && data.text){
+    String(data.text).split('\n').forEach(function(t){
+      t = t.replace(/\s+/g, ' ').trim();
+      if(t) lines.push({ text: t, top: null, mid: null, h: null });
+    });
+  }
+  if(lines.length && lines[0].mid !== null){
+    lines.sort(function(a, b){ return a.mid - b.mid; });
+  }
+  return lines;
 }
 
-function show(parsed){
+/* ---- matching a printed label to a wanted one, loosely ----
+   OCR turns Tel into Tal or Te1 often enough that exact matching is
+   too brittle, so one wrong character is forgiven.                 */
+function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g, ''); }
+
+function near(a, b){
+  a = norm(a); b = norm(b);
+  if(!a || !b) return false;
+  if(a === b) return true;
+  if(a.length > 3 && b.length > 3 && (a.indexOf(b) === 0 || b.indexOf(a) === 0)) return true;
+  if(Math.abs(a.length - b.length) > 1) return false;
+  var i, j, prev = [], cur = [];
+  for(j = 0; j <= b.length; j++) prev[j] = j;
+  for(i = 1; i <= a.length; i++){
+    cur[0] = i;
+    for(j = 1; j <= b.length; j++){
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    }
+    prev = cur.slice();
+  }
+  return prev[b.length] <= 1;
+}
+
+function splitLabel(line){
+  var at = line.indexOf(':');
+  if(at < 1) return null;
+  var label = line.slice(0, at).trim();
+  if(label.length > 24 || !/[A-Za-z]/.test(label) || /[@\/]/.test(label)) return null;
+  return { label: label, value: line.slice(at + 1).trim() };
+}
+
+/* ---- pull the six fields out, then decide whether to accept the card ---- */
+function verdict(lines){
+  var found = {}, hits = 0, leftovers = [], i;
+
+  // 1. the four labelled fields
+  for(i = 0; i < lines.length; i++){
+    var parts = splitLabel(lines[i].text);
+    if(!parts){ leftovers.push(lines[i]); continue; }
+
+    var wanted = null;
+    LABELLED.forEach(function(w){ if(near(parts.label, w)) wanted = w; });
+    if(!wanted) continue;                                  // Email and ID land here and are dropped
+
+    var value = parts.value;
+    if(!value && lines[i+1] && !splitLabel(lines[i+1].text)) value = lines[i+1].text;
+    if(found[wanted]) continue;
+    found[wanted] = value;
+    if(value) hits++;
+  }
+
+  // 2. the organisation band, used only as a hint that this is an ICF card
+  var orgSeen = lines.some(function(l){
+    var n = norm(l.text);
+    return n.indexOf('informatics') > -1 || n.indexOf('consultancy') > -1;
+  });
+
+  // 3. name and position, from the colon free lines below the blue band
+  var cut = imgH ? imgH * TOP_STRIP : 0;
+  var cands = leftovers.filter(function(l){
+    var n = norm(l.text);
+    if(n.length < 4) return false;
+    if(l.text.indexOf('@') > -1) return false;
+    if(n.indexOf('informatics') > -1 || n.indexOf('consultancy') > -1 || n.indexOf('sierraleone') > -1) return false;
+    if(l.top !== null && cut && l.top < cut) return false;
+    return /[A-Za-z]{3}/.test(l.text);
+  });
+
+  if(cands.length){
+    var nameLine = cands[0], k;
+    if(cands[0].h !== null){
+      for(k = 1; k < cands.length; k++) if(cands[k].h > nameLine.h) nameLine = cands[k];
+    }
+    found['Name'] = nameLine.text;
+    var at = cands.indexOf(nameLine);
+    if(cands[at + 1]) found['Position'] = cands[at + 1].text;
+  }
+
+  // 4. accept or refuse
+  var recognised = hits >= MIN_LABELS || (orgSeen && hits >= 1);
+  if(!recognised){
+    show_reject(lines, hits, orgSeen);
+    return;
+  }
+
+  show_fields(found);
+}
+
+function show_fields(found){
   rows.innerHTML = '';
-  parsed.fields.forEach(function(f){
+  var missing = 0;
+  ORDER.forEach(function(key){
     var row = document.createElement('div'); row.className = 'row';
-    var k = document.createElement('div'); k.className = 'k'; k.textContent = f.label;
-    var v = document.createElement('div'); v.className = 'v'; v.textContent = f.value || 'not read';
+    var k = document.createElement('div'); k.className = 'k'; k.textContent = key;
+    var v = document.createElement('div');
+    if(found[key]){ v.className = 'v'; v.textContent = found[key]; }
+    else { v.className = 'v none'; v.textContent = 'not read'; missing++; }
     row.appendChild(k); row.appendChild(v);
     rows.appendChild(row);
   });
-
-  looseList.innerHTML = '';
-  parsed.loose.forEach(function(l){
-    var li = document.createElement('li'); li.textContent = l; looseList.appendChild(li);
-  });
-  loose.style.display = parsed.loose.length ? 'block' : 'none';
-
+  reject.style.display = 'none';
   out.style.display = 'block';
+  say(missing ? 'err' : 'good',
+      missing ? missing + ' of the six fields did not come through. Retake the photo in better light before you rely on it.'
+              : 'All six fields read.');
+  out.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-document.getElementById('reset').onclick = function(){
-  imgURL = null;
-  rows.innerHTML = ''; looseList.innerHTML = '';
-  loose.style.display = 'none';
+function show_reject(lines, hits, orgSeen){
+  why.textContent = orgSeen
+    ? 'The ICF-SL name was found but only ' + hits + ' of the four labelled fields, so this is either the wrong side of the card or too blurred to trust.'
+    : 'None of the fields this app expects were found. Dept, Tel, Address and Valid are all missing, so this is not an ICF-SL staff card.';
+  seenList.innerHTML = '';
+  lines.slice(0, 12).forEach(function(l){
+    var li = document.createElement('li'); li.textContent = l.text; seenList.appendChild(li);
+  });
   out.style.display = 'none';
+  reject.style.display = 'block';
+  clear();
+  reject.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function resetAll(){
+  imgURL = null; imgH = 0;
+  rows.innerHTML = ''; seenList.innerHTML = '';
+  hidePanels();
   shot.innerHTML = '<span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span>';
   readBtn.disabled = true;
   clear(); progress(null);
   window.scrollTo({top:0, behavior:'smooth'});
-};
+}
+document.getElementById('reset').onclick = resetAll;
+document.getElementById('reset2').onclick = resetAll;
 </script>
 </body>
 </html>
