@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ID Capture</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{
+  --navy:#004080;
+  --navy-dark:#002d5a;
+  --gold:#ffc107;
+  --ink:#1b2733;
+  --line:#c9d6e4;
+  --bg:#eef3f8;
+  --ok:#1c7c4a;
+  --bad:#b3261e;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:var(--bg);font-family:'Roboto',Arial,sans-serif;color:var(--ink);font-size:15px;line-height:1.45}
+header{background:var(--navy);border-bottom:4px solid var(--gold);padding:14px 16px;position:sticky;top:0;z-index:5}
+header h1{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#fff;margin:0;font-size:19px}
+header p{margin:2px 0 0;color:#cfe0f2;font-size:12px}
+main{max-width:520px;margin:0 auto;padding:14px 14px 40px}
+.card{background:#fff;border:2px solid var(--navy);outline:1px solid var(--navy);outline-offset:3px;border-radius:2px;padding:14px;margin:0 0 22px}
+.card h2{font-family:'Oswald',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:.6px;font-size:14px;color:var(--navy);margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.shot{border:2px dashed var(--line);border-radius:2px;min-height:160px;display:flex;align-items:center;justify-content:center;background:#f7fafd;overflow:hidden;margin-bottom:10px}
+.shot span{font-size:13px;color:#6b7a89;padding:16px;text-align:center}
+.shot img{width:100%;display:block}
+.btn{display:block;width:100%;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:.7px;font-size:15px;font-weight:500;border:0;border-radius:2px;padding:13px;cursor:pointer}
+.btn.primary{background:var(--navy);color:#fff}
+.btn.primary:active{background:var(--navy-dark)}
+.btn.gold{background:var(--gold);color:#1b2733}
+.btn.ghost{background:#fff;color:var(--navy);border:2px solid var(--navy)}
+.btn+.btn{margin-top:8px}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:3px 7px;border-radius:2px;margin-bottom:10px}
+.badge.on{background:#e6f4ec;color:var(--ok)}
+.badge.off{background:#fdeceb;color:var(--bad)}
+.badge.wait{background:#e8f0f8;color:var(--navy)}
+.bar{height:6px;background:#dce6f0;border-radius:2px;overflow:hidden;margin-top:10px;display:none}
+.bar.show{display:block}
+.bar i{display:block;height:100%;width:0;background:var(--gold);transition:width .25s}
+.row{padding:9px 0;border-bottom:1px solid #e6edf4}
+.row:last-child{border-bottom:0}
+.row .k{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--navy)}
+.row .v{font-size:16px;font-weight:500;word-break:break-word;margin-top:1px}
+.loose{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.loose h3{font-family:'Oswald',sans-serif;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:#6b7a89;margin:0 0 6px}
+.loose ul{margin:0;padding-left:18px}
+.loose li{font-size:14px;margin-bottom:3px;word-break:break-word}
+.status{margin-top:10px;font-size:13px;padding:9px 10px;border-radius:2px;display:none}
+.status.show{display:block}
+.status.work{background:#e8f0f8;color:var(--navy)}
+.status.good{background:#e6f4ec;color:var(--ok)}
+.status.err{background:#fdeceb;color:var(--bad)}
+.spin{width:14px;height:14px;border:2px solid #b9cde2;border-top-color:var(--navy);border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:6px;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+#out{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ID Capture</h1>
+  <p>Reads the card in the browser</p>
+</header>
+
+<main>
+
+  <div class="card">
+    <h2>Photo of the card</h2>
+    <div id="engine" class="badge wait">Checking the reader</div>
+    <div class="shot" id="shot"><span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span></div>
+    <input type="file" id="file" accept="image/*" capture="environment" hidden>
+    <button class="btn primary" id="snap">Take photo</button>
+    <button class="btn ghost" id="pick">Choose from gallery</button>
+    <button class="btn gold" id="read" disabled>Read the card</button>
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+    <div class="status" id="st"></div>
+  </div>
+
+  <div class="card" id="out">
+    <h2>What the card says</h2>
+    <div id="rows"></div>
+    <div class="loose" id="loose" style="display:none">
+      <h3>Text with no label</h3>
+      <ul id="looseList"></ul>
+    </div>
+    <button class="btn ghost" id="reset" style="margin-top:14px">Read another card</button>
+  </div>
+
+</main>
+
+<script>
+var imgURL = null;                 // data URL of the cleaned up photo
+var worker = null;                 // the Tesseract worker, made once and kept
+var shot = document.getElementById('shot');
+var file = document.getElementById('file');
+var st   = document.getElementById('st');
+var out  = document.getElementById('out');
+var rows = document.getElementById('rows');
+var loose = document.getElementById('loose');
+var looseList = document.getElementById('looseList');
+var readBtn = document.getElementById('read');
+var engine = document.getElementById('engine');
+var bar = document.getElementById('bar');
+var barFill = document.getElementById('barFill');
+
+var HAS_OCR = typeof Tesseract !== 'undefined';
+engine.className = 'badge ' + (HAS_OCR ? 'on' : 'off');
+engine.textContent = HAS_OCR
+  ? 'Reader loaded, runs in the browser'
+  : 'Reader did not load, check the connection and reload';
+
+function say(kind, html){
+  st.className = 'status show ' + kind;
+  st.innerHTML = (kind === 'work' ? '<span class="spin"></span>' : '') + html;
+}
+function clear(){ st.className = 'status'; st.innerHTML = ''; }
+function progress(p){
+  if(p === null){ bar.className = 'bar'; barFill.style.width = '0'; return; }
+  bar.className = 'bar show';
+  barFill.style.width = Math.round(p * 100) + '%';
+}
+
+document.getElementById('snap').onclick = function(){
+  file.setAttribute('capture','environment'); file.value = ''; file.click();
+};
+document.getElementById('pick').onclick = function(){
+  file.removeAttribute('capture'); file.value = ''; file.click();
+};
+
+file.onchange = function(){
+  var f = file.files && file.files[0];
+  if(!f) return;
+  clear(); out.style.display = 'none'; progress(null);
+  prepare(f, function(url){
+    imgURL = url;
+    shot.innerHTML = '<img src="' + url + '" alt="Captured card">';
+    readBtn.disabled = !HAS_OCR;
+    if(!HAS_OCR) say('err','The reader did not load, so the card cannot be read. Reload the page once you have a connection.');
+  }, function(msg){ say('err', msg); });
+};
+
+/* Resize to 1800px on the long side, then grey it and stretch the contrast.
+   Tesseract reads flat black on white far better than a colour photograph. */
+function prepare(f, done, fail){
+  var r = new FileReader();
+  r.onerror = function(){ fail('Could not read that file. Try taking the photo again.'); };
+  r.onload = function(){
+    var im = new Image();
+    im.onerror = function(){ fail('That file is not an image the browser can open.'); };
+    im.onload = function(){
+      var max = 1800, w = im.width, h = im.height;
+      if(Math.max(w,h) > max){ var s = max/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s); }
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var ctx = c.getContext('2d');
+      ctx.drawImage(im, 0, 0, w, h);
+
+      try{
+        var d = ctx.getImageData(0, 0, w, h), px = d.data;
+        var lo = 255, hi = 0, i;
+        for(i = 0; i < px.length; i += 4){
+          var g = (px[i]*0.299 + px[i+1]*0.587 + px[i+2]*0.114) | 0;
+          px[i] = px[i+1] = px[i+2] = g;
+          if(g < lo) lo = g;
+          if(g > hi) hi = g;
+        }
+        var span = Math.max(1, hi - lo);
+        for(i = 0; i < px.length; i += 4){
+          var v = (px[i] - lo) * 255 / span;
+          v = v < 0 ? 0 : v > 255 ? 255 : v;
+          px[i] = px[i+1] = px[i+2] = v;
+        }
+        ctx.putImageData(d, 0, 0);
+      }catch(e){ /* a tainted canvas would land here, the colour photo still reads */ }
+
+      done(c.toDataURL('image/jpeg', 0.92));
+    };
+    im.src = r.result;
+  };
+  r.readAsDataURL(f);
+}
+
+readBtn.onclick = function(){
+  if(!imgURL || !HAS_OCR) return;
+  readBtn.disabled = true;
+  say('work','Reading the card...');
+  progress(0);
+
+  ready()
+    .then(function(w){ return w.recognize(imgURL); })
+    .then(function(res){
+      progress(null);
+      readBtn.disabled = false;
+      var text = (res && res.data && res.data.text) || '';
+      var parsed = parse(text.split('\n'));
+      if(!parsed.fields.length && !parsed.loose.length){
+        say('err','No text was found. Move closer, hold the card flat, and keep the light off the surface.');
+        return;
+      }
+      show(parsed);
+      say(parsed.fields.length ? 'good' : 'err',
+          parsed.fields.length
+            ? parsed.fields.length + ' labelled fields found' + (parsed.loose.length ? ', plus ' + parsed.loose.length + ' lines with no label.' : '.')
+            : 'Text was found but no labels. The lines are listed below.');
+      out.scrollIntoView({behavior:'smooth', block:'start'});
+    })
+    .catch(function(e){
+      progress(null);
+      readBtn.disabled = false;
+      say('err','Could not read the card. ' + (e && e.message ? e.message : e));
+    });
+};
+
+/* One worker, made on the first read and kept for the rest of the session.
+   The first card pays for the download of the engine and the English data. */
+function ready(){
+  if(worker) return Promise.resolve(worker);
+  say('work','Loading the reader for the first time, this takes a moment...');
+  return Tesseract.createWorker('eng', 1, {
+    logger: function(m){ if(m && typeof m.progress === 'number') progress(m.progress); }
+  }).then(function(w){ worker = w; return w; });
+}
+
+/* ---- label before the colon, value after it ----
+   A colon only counts when the part before it is short and looks like a label,
+   so 12:30 and http:// stay intact. A label whose value sits on the next line
+   picks that line up.                                                        */
+function parse(lines){
+  var clean = lines.map(function(l){ return String(l).replace(/\s+/g,' ').trim(); })
+                   .filter(function(l){ return l.length > 1; });
+  var fields = [], looseLines = [], used = {};
+
+  clean.forEach(function(line, i){
+    if(used[i]) return;
+    var at = line.indexOf(':');
+    var label = at > -1 ? line.slice(0, at).trim() : '';
+    var value = at > -1 ? line.slice(at + 1).trim() : '';
+    var looksLikeLabel = at > 0 && label.length <= 24 && /[A-Za-z]/.test(label) &&
+                         !/[@\/]/.test(label) && !/^\d+$/.test(label);
+
+    if(!looksLikeLabel){ looseLines.push(line); return; }
+
+    if(!value && clean[i+1] !== undefined && clean[i+1].indexOf(':') === -1){
+      value = clean[i+1];
+      used[i+1] = true;
+    }
+    fields.push({ label: label, value: value });
+  });
+
+  var seen = {}, merged = [];
+  fields.forEach(function(f){
+    var key = f.label.toLowerCase();
+    if(seen[key] !== undefined){
+      if(f.value) merged[seen[key]].value = (merged[seen[key]].value + ' ' + f.value).trim();
+    } else {
+      seen[key] = merged.length;
+      merged.push(f);
+    }
+  });
+
+  return { fields: merged, loose: looseLines };
+}
+
+function show(parsed){
+  rows.innerHTML = '';
+  parsed.fields.forEach(function(f){
+    var row = document.createElement('div'); row.className = 'row';
+    var k = document.createElement('div'); k.className = 'k'; k.textContent = f.label;
+    var v = document.createElement('div'); v.className = 'v'; v.textContent = f.value || 'not read';
+    row.appendChild(k); row.appendChild(v);
+    rows.appendChild(row);
+  });
+
+  looseList.innerHTML = '';
+  parsed.loose.forEach(function(l){
+    var li = document.createElement('li'); li.textContent = l; looseList.appendChild(li);
+  });
+  loose.style.display = parsed.loose.length ? 'block' : 'none';
+
+  out.style.display = 'block';
+}
+
+document.getElementById('reset').onclick = function(){
+  imgURL = null;
+  rows.innerHTML = ''; looseList.innerHTML = '';
+  loose.style.display = 'none';
+  out.style.display = 'none';
+  shot.innerHTML = '<span>No photo yet. Hold the card flat, fill the frame, avoid glare.</span>';
+  readBtn.disabled = true;
+  clear(); progress(null);
+  window.scrollTo({top:0, behavior:'smooth'});
+};
+</script>
+</body>
+</html>
